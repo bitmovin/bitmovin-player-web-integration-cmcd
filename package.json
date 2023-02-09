@@ -1,12 +1,12 @@
 {
-  "name": "player-web-integration-template",
+  "name": "@bitmovin/player-web-integration-cmcd",
   "version": "1.0.0",
   "description": "",
   "types": "dist/js/main.d.ts",
-  "browser": "dist/js/bitmovin-player-integration-template.js",
+  "browser": "dist/js/bitmovin-player-integration-cmcd.js",
   "repository": {
     "type": "git",
-    "url": "ssh://git@github.com:bitmovin/player-web-integration-template.git"
+    "url": "ssh://git@github.com:bitmovin/player-web-integration-cmcd.git"
   },
   "scripts": {
     "format": "prettier --write src/",

@@ -1,39 +1,50 @@
-# Bitmovin Player Integration Template Repo - Remove this section!
-1. Create repo out of this template repo
-2. Update in `package.json`:
-  1. `name` (should still start with `bitmovin-player-integration-`)
-  2. `browser` (filename should still start with `bitmovin-player-`)
-  3. `repository.url`
-  4. Potentially upgrade dependency versions as needed
-3. Run `npm i` to create a `package-lock.json` with the up to date details. Add the new file to the git repo and commit it.
-4. Update `integrationName` variable in `tooling/webpack.common.js` (recommended to start with an uppercase character)
-5. Update `bitmovin-player-integration.js` filename in `dist/index.html` to match the output file name of `tooling/webpack.common.js` (see `module.exports.output.filename` field there)
-6. `src/ts/main.ts` is the file where all public exports should be added, the main entry file for uses of the integration library
-7. The `.github/workflow` folder contains a CI workflow for Github Actions. In this Github org, we can only use it for open source repos. Remove it if this is not open source.
-8. Update this `README.md` file:
-    1. `<INTEGRATION_NAME>` and `<DESCRIPTION>` below
-    2. Update the npm package name in the `Install` section
-    3. Add how to use this library in the `Usage` section
-9. Remove this line and everything above it from this `README.md` file
+# Bitmovin Player CMCD Integration
 
-
-# Bitmovin Player <INTEGRATION_NAME>
-
-<DESCRIPTION>
+This project adds support for the Common Media Client Data (CMCD) plugin. Please find more information about the Consumer Technology Association (CTA) Specification in https://cdn.cta.tech/cta/media/media/resources/standards/pdfs/cta-5004-final.pdf
 
 ## Install
 Install with npm:
 ```
-npm install --save @bitmovin/player-integration-<template>
+npm install --save @bitmovin/player-integration-cmcd
 ```
 Install with yarn:
 ```
-yarn add @bitmovin/player-integration-<template>
+yarn add @bitmovin/player-integration-cmcd
 ```
 
 ## Usage
 
-<Describe how a user can leverage this library>
+Create an instance of the `CmcdIntegration` with a `CmcdConfig` and set the different callbacks in the `PlayerConfig` as follows:
+
+```ts
+const playerConfig: PlayerConfig = {
+  // all configurations you would typically set
+};
+
+const cmcdConfig: CmcdConfig = {
+  useQueryArgs: true,
+  sessionId: '6e2fb550-c457-11e9-bb97-0800200c9a66',
+  contentId: '1111-111111-111111-11111',
+};
+
+const cmcdPlugin = new CmcdIntegration(cmcdConfig);
+playerConfig.network = {
+  preprocessHttpRequest: cmcdPlugin.preprocessHttpRequest,
+  preprocessHttpResponse: cmcdPlugin.preprocessHttpResponse,
+};
+playerConfig.adaptation = {
+  desktop: {
+    onVideoAdaptation: cmcdPlugin.onVideoAdaptation,
+    onAudioAdaptation: cmcdPlugin.onAudioAdaptation,
+  },
+  mobile: {
+    onVideoAdaptation: cmcdPlugin.onVideoAdaptation,
+    onAudioAdaptation: cmcdPlugin.onAudioAdaptation,
+  },
+};
+```
+After that, you create a Bitmovin Player instance as usual:
+
 
 ## Setup for Development
 1. Run `npm install` to install dependencies

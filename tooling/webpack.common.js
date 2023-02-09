@@ -1,7 +1,7 @@
 const path = require('path');
 const webpack = require('webpack');
 
-const integrationName = 'Template';
+const integrationName = 'Cmcd';
 
 module.exports = {
   entry: './src/ts/main.ts',
