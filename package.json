@@ -1,0 +1,46 @@
+{
+  "name": "player-web-integration-template",
+  "version": "1.0.0",
+  "description": "",
+  "types": "dist/js/main.d.ts",
+  "browser": "dist/js/bitmovin-player-integration-template.js",
+  "repository": {
+    "type": "git",
+    "url": "ssh://git@github.com:bitmovin/player-web-integration-template.git"
+  },
+  "scripts": {
+    "format": "prettier --write src/",
+    "prepare": "husky install",
+    "start": "webpack serve --open --config tooling/webpack.dev.js",
+    "debug": "webpack --config tooling/webpack.dev.js",
+    "build": "webpack --config tooling/webpack.prod.js",
+    "clean": "rm -R dist/js",
+    "test": "jest",
+    "test-watch": "jest --watch"
+  },
+  "lint-staged": {
+    "**/*.{ts,js}": "prettier --write --ignore-unknown",
+    "CHANGELOG.md": "kacl lint --filename"
+  },
+  "author": "Bitmovin",
+  "license": "MIT",
+  "devDependencies": {
+    "@jest/globals": "^29.4.2",
+    "husky": "^8.0.3",
+    "jest": "^29.4.2",
+    "jest-environment-jsdom": "^29.4.2",
+    "kacl": "^1.1.1",
+    "lint-staged": "^13.1.1",
+    "prettier": "^2.8.4",
+    "ts-jest": "^29.0.5",
+    "ts-loader": "^9.4.2",
+    "typescript": "^4.9.5",
+    "webpack": "^5.75.0",
+    "webpack-cli": "^5.0.1",
+    "webpack-dev-server": "^4.11.1",
+    "webpack-merge": "^5.8.0"
+  },
+  "peerDependencies": {
+    "bitmovin-player": "^8.104.0"
+  }
+}

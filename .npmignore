@@ -1,0 +1,9 @@
+.idea
+.vscode
+.github
+.husky
+.nvmrc
+.prettier*
+src
+tsconfig*
+tooling
