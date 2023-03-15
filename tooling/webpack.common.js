@@ -4,7 +4,7 @@ const webpack = require('webpack');
 const integrationName = 'Cmcd';
 
 module.exports = {
-  entry: './src/ts/main.ts',
+  entry: ['./src/ts/Cmcd.ts', './src/ts/CmcdIntegration.ts'],
   module: {
     rules: [
       {
