@@ -208,7 +208,7 @@ export class CmcdBufferLength extends CmcdBase {
   public readonly type = CmcdHeaderType.Request;
 
   constructor(value: IntegerMilliSecs) {
-    super(value);
+    super(Math.round(value / 100) * 100);
   }
 }
 
@@ -283,7 +283,7 @@ export class CmcdDeadline extends CmcdBase {
   public readonly type = CmcdHeaderType.Request;
 
   constructor(value: IntegerMilliSecs) {
-    super(value);
+    super(Math.round(value / 100) * 100);
   }
 }
 
@@ -306,7 +306,7 @@ export class CmcdMeasuredThroughput extends CmcdBase {
   public readonly type = CmcdHeaderType.Request;
 
   constructor(value: IntegerKbps) {
-    super(value);
+    super(Math.round(value / 100) * 100);
   }
 }
 
