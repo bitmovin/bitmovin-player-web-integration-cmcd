@@ -27,24 +27,36 @@ const cmcdConfig: CmcdConfig = {
   contentId: '1111-111111-111111-11111',
 };
 
-const cmcdPlugin = new CmcdIntegration(cmcdConfig);
+const cmcdIntegration = new CmcdIntegration(cmcdConfig);
 playerConfig.network = {
-  preprocessHttpRequest: cmcdPlugin.preprocessHttpRequest,
-  preprocessHttpResponse: cmcdPlugin.preprocessHttpResponse,
+  preprocessHttpRequest: cmcdIntegration.preprocessHttpRequest,
+  preprocessHttpResponse: cmcdIntegration.preprocessHttpResponse,
 };
 playerConfig.adaptation = {
   desktop: {
-    onVideoAdaptation: cmcdPlugin.onVideoAdaptation,
-    onAudioAdaptation: cmcdPlugin.onAudioAdaptation,
+    onVideoAdaptation: cmcdIntegration.onVideoAdaptation,
+    onAudioAdaptation: cmcdIntegration.onAudioAdaptation,
   },
   mobile: {
-    onVideoAdaptation: cmcdPlugin.onVideoAdaptation,
-    onAudioAdaptation: cmcdPlugin.onAudioAdaptation,
+    onVideoAdaptation: cmcdIntegration.onVideoAdaptation,
+    onAudioAdaptation: cmcdIntegration.onAudioAdaptation,
   },
 };
 ```
-After that, you create a Bitmovin Player instance as usual:
+After that, you create a Bitmovin Player instance as usual, then pass the player instance to the CMCD integration:
+```js
+cmcdIntegration.setPlayer(player);
+```
 
+It is recommend to set the CMCD Session ID to the Analytics Impression ID as this enabled you to connect CDN logs with CMCD data to Analytics sessions:
+```js
+cmcdIntegration.setSessionId(player.analytics.getCurrentImpressionId());
+```
+
+Load the source into the player after these steps:
+```js
+player.load(source);
+```
 
 ## Setup for Development
 1. Run `npm install` to install dependencies
