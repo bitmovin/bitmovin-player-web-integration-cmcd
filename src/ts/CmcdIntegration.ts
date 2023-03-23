@@ -141,6 +141,14 @@ export class CmcdIntegration {
     return Promise.resolve(response);
   };
 
+  public setSessionId(id: string): void {
+    this.sessionId = id;
+  }
+
+  public setContentId(id: string): void {
+    this.contentId = id;
+  }
+
   private gatherCmcdData(type: HttpRequestType, request: HttpRequest): CmcdBase[] {
     if (!this.player) {
       throw new Error('Bitmovin Player not provided!');
