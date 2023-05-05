@@ -138,7 +138,7 @@ export function cmcdDataToUrlParameter(data: CmcdBase[]): string {
 
   // 10. If the data payload is transmitted as a query argument, then the entire payload
   // string MUST be URLEncoded per [5].
-  return `CMCD=${encodeURI(cmcdString)}`;
+  return `CMCD=${encodeURIComponent(cmcdString)}`;
 }
 
 export function cmcdDataToJson(data: CmcdBase[]): string {

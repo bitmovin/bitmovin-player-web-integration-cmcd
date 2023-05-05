@@ -25,7 +25,7 @@ describe('Cmcd', () => {
       new CmcdObjectType(CmcdObjectTypeToken.VideoOnly),
     ];
 
-    expect(cmcdDataToUrlParameter(cmcdObjects)).toEqual('CMCD=bl=0,br=500,bs,ot=v');
+    expect(cmcdDataToUrlParameter(cmcdObjects)).toEqual('CMCD=bl%3D0%2Cbr%3D500%2Cbs%2Cot%3Dv');
   });
 
   it('should always sort the URL parameters alphabetically by CMCD key', () => {
