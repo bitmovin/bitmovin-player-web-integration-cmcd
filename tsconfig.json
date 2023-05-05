@@ -1,5 +1,5 @@
 {
-  "files": ["src/ts/main.ts"],
+  "files": ["src/ts/CmcdIntegration.ts"],
   "compilerOptions": {
     "noImplicitAny": true,
     "module": "es6",
