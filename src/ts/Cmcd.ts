@@ -166,6 +166,10 @@ export abstract class CmcdBase {
    */
   keyValuePairToString(): string {
     if (typeof this.value === 'string') {
+      if (!this.value) {
+        return '';
+      }
+
       // 7. Any value of type String MUST be enclosed by opening and closing double
       // quotes Unicode 0x22. Double quotes and backslashes MUST be escaped using a
       // backslash "\" Unicode 0x5C character. Any value of type Token does not require
