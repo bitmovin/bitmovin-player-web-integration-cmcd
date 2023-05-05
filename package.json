@@ -6,7 +6,7 @@
   "browser": "dist/js/bitmovin-player-integration-cmcd.js",
   "repository": {
     "type": "git",
-    "url": "ssh://git@github.com:bitmovin/player-web-integration-cmcd.git"
+    "url": "ssh://git@github.com:bitmovin/bitmovin-player-web-integration-cmcd.git"
   },
   "scripts": {
     "format": "prettier --write src/ test/",
