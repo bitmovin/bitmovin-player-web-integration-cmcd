@@ -560,5 +560,5 @@ function escapeCmcdString(str: string) {
   const doubleQuotesRegex = /"/g;
   const backslashRegex = /\\/g;
 
-  return `"${str.replace(backslashRegex, '\\').replace(doubleQuotesRegex, '\\"')}"`;
+  return `"${str.replace(backslashRegex, '\\\\').replace(doubleQuotesRegex, '\\"')}"`;
 }
