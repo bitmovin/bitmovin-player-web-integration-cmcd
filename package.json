@@ -9,7 +9,7 @@
     "url": "ssh://git@github.com:bitmovin/player-web-integration-cmcd.git"
   },
   "scripts": {
-    "format": "prettier --write src/",
+    "format": "prettier --write src/ test/",
     "prepare": "husky install",
     "start": "webpack serve --open --config tooling/webpack.dev.js",
     "debug": "webpack --config tooling/webpack.dev.js",
