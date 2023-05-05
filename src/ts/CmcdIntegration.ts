@@ -49,8 +49,8 @@ import {
 } from './Cmcd';
 
 export interface CmcdConfig {
-  sessionId: string;
-  contentId: string;
+  sessionId?: string;
+  contentId?: string;
   useQueryArgs?: boolean;
 }
 
@@ -69,8 +69,8 @@ export class CmcdIntegration {
 
   constructor(config: CmcdConfig) {
     this.useQueryArgs = config.useQueryArgs || false;
-    this.sessionId = config.sessionId;
-    this.contentId = config.contentId;
+    this.sessionId = config.sessionId || '';
+    this.contentId = config.contentId || '';
     this.stalledSinceLastRequest = false;
     this.currentVideoQuality = null;
     this.currentAudioQuality = null;
