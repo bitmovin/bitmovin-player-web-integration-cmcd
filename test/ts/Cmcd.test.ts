@@ -6,9 +6,20 @@ import {
   CmcdDeadline,
   CmcdEncodedBitrate,
   CmcdMeasuredThroughput,
+  CmcdNextObjectRequest,
+  CmcdNextRangeRequest,
+  CmcdObjectDuration,
   CmcdObjectType,
   CmcdObjectTypeToken,
   CmcdPlaybackRate,
+  CmcdRequestedMaximumThroughput,
+  CmcdSessionId,
+  CmcdStartup,
+  CmcdStreamType,
+  CmcdStreamTypeToken,
+  CmcdStreamingFormat,
+  CmcdStreamingFormatToken,
+  CmcdTopBitrate,
   CmcdVersion,
   CmcdVersionNumbers,
   cmcdDataToHeader,
@@ -143,6 +154,142 @@ describe('Cmcd', () => {
 
     it('should remove CMCD version if value is 1', () => {
       expect(new CmcdVersion(CmcdVersionNumbers.v1).keyValuePairToString()).toEqual('');
+    });
+  });
+
+  describe('CMCD Spec Examples', () => {
+    // Examples from CMCD v1 spec Section 6 taken as test cases
+
+    it('Section 6, Example #1:', () => {
+      const cmcdObjects = [new CmcdSessionId('6e2fb550-c457-11e9-bb97-0800200c9a66')];
+      expect(cmcdDataToUrlParameter(cmcdObjects)).toEqual('CMCD=sid%3D%226e2fb550-c457-11e9-bb97-0800200c9a66%22');
+      expect(cmcdDataToHeader(cmcdObjects)).toEqual({
+        'CMCD-Session': 'sid="6e2fb550-c457-11e9-bb97-0800200c9a66"',
+      });
+    });
+
+    it('Section 6, Example #2:', () => {
+      const cmcdObjects = [
+        new CmcdEncodedBitrate(3200),
+        new CmcdBufferStarvation(true),
+        new CmcdObjectDuration(4004),
+        new CmcdMeasuredThroughput(25432),
+        new CmcdObjectType(CmcdObjectTypeToken.VideoOnly),
+        new CmcdRequestedMaximumThroughput(15000),
+        new CmcdSessionId('6e2fb550-c457-11e9-bb97-0800200c9a66'),
+        new CmcdTopBitrate(6000),
+      ];
+
+      expect(cmcdDataToUrlParameter(cmcdObjects)).toEqual(
+        'CMCD=br%3D3200%2Cbs%2Cd%3D4004%2Cmtp%3D25400%2Cot%3Dv%2Crtp%3D15000%2Csid%3D%226e2fb550-c457-11e9-bb97-0800200c9a66%22%2Ctb%3D6000'
+      );
+      expect(cmcdDataToHeader(cmcdObjects)).toEqual({
+        'CMCD-Request': 'mtp=25400',
+        'CMCD-Object': 'br=3200,d=4004,ot=v,tb=6000',
+        'CMCD-Status': 'bs,rtp=15000',
+        'CMCD-Session': 'sid="6e2fb550-c457-11e9-bb97-0800200c9a66"',
+      });
+    });
+
+    it('Section 6, Example #3:', () => {
+      const cmcdObjects = [
+        new CmcdBufferStarvation(true),
+        new CmcdRequestedMaximumThroughput(15000),
+        new CmcdSessionId('6e2fb550-c457-11e9-bb97-0800200c9a66'),
+      ];
+      // Small mistake in the CMCD spec where 'bs' was truncated to 'b' in this query arg example
+      expect(cmcdDataToUrlParameter(cmcdObjects)).toEqual(
+        'CMCD=bs%2Crtp%3D15000%2Csid%3D%226e2fb550-c457-11e9-bb97-0800200c9a66%22'
+      );
+      expect(cmcdDataToHeader(cmcdObjects)).toEqual({
+        'CMCD-Status': 'bs,rtp=15000',
+        'CMCD-Session': 'sid="6e2fb550-c457-11e9-bb97-0800200c9a66"',
+      });
+    });
+
+    it('Section 6, Example #4:', () => {
+      const cmcdObjects = [new CmcdBufferStarvation(true), new CmcdStartup(true)];
+      expect(cmcdDataToUrlParameter(cmcdObjects)).toEqual('CMCD=bs%2Csu');
+      expect(cmcdDataToHeader(cmcdObjects)).toEqual({
+        'CMCD-Status': 'bs',
+        'CMCD-Request': 'su',
+      });
+    });
+
+    it('Section 6, Example #6:', () => {
+      const cmcdObjects = [
+        new CmcdNextObjectRequest('..%2F300kbps%2Fsegment35.m4v'),
+        new CmcdSessionId('6e2fb550-c457-11e9-bb97-0800200c9a66'),
+      ];
+      expect(cmcdDataToUrlParameter(cmcdObjects)).toEqual(
+        'CMCD=nor%3D%22..%252F300kbps%252Fsegment35.m4v%22%2Csid%3D%226e2fb550-c457-11e9-bb97-0800200c9a66%22'
+      );
+      expect(cmcdDataToHeader(cmcdObjects)).toEqual({
+        'CMCD-Session': 'sid="6e2fb550-c457-11e9-bb97-0800200c9a66"',
+        'CMCD-Request': 'nor="..%2F300kbps%2Fsegment35.m4v"',
+      });
+    });
+
+    it('Section 6, Example #7:', () => {
+      const cmcdObjects = [
+        new CmcdNextRangeRequest('12323-48763'),
+        new CmcdSessionId('6e2fb550-c457-11e9-bb97-0800200c9a66'),
+      ];
+      expect(cmcdDataToUrlParameter(cmcdObjects)).toEqual(
+        'CMCD=nrr%3D%2212323-48763%22%2Csid%3D%226e2fb550-c457-11e9-bb97-0800200c9a66%22'
+      );
+      expect(cmcdDataToHeader(cmcdObjects)).toEqual({
+        'CMCD-Session': 'sid="6e2fb550-c457-11e9-bb97-0800200c9a66"',
+        'CMCD-Request': 'nrr="12323-48763"',
+      });
+    });
+
+    it('Section 6, Example #8:', () => {
+      const cmcdObjects = [
+        new CmcdNextObjectRequest('..%2F300kbps%2Ftrack.m4v'),
+        new CmcdNextRangeRequest('12323-48763'),
+        new CmcdSessionId('6e2fb550-c457-11e9-bb97-0800200c9a66'),
+      ];
+      expect(cmcdDataToUrlParameter(cmcdObjects)).toEqual(
+        'CMCD=nor%3D%22..%252F300kbps%252Ftrack.m4v%22%2Cnrr%3D%2212323-48763%22%2Csid%3D%226e2fb550-c457-11e9-bb97-0800200c9a66%22'
+      );
+      expect(cmcdDataToHeader(cmcdObjects)).toEqual({
+        'CMCD-Session': 'sid="6e2fb550-c457-11e9-bb97-0800200c9a66"',
+        'CMCD-Request': 'nor="..%2F300kbps%2Ftrack.m4v",nrr="12323-48763"',
+      });
+    });
+
+    it('Section 6, Example #9:', () => {
+      const cmcdObjects = [
+        new CmcdBufferLength(21300),
+        new CmcdEncodedBitrate(3200),
+        new CmcdBufferStarvation(true),
+        new CmcdContentId('faec5fc2-ac30-11ea-bb37-0242ac130002'),
+        new CmcdObjectDuration(4004),
+        new CmcdDeadline(18500),
+        new CmcdMeasuredThroughput(48100),
+        new CmcdNextObjectRequest('..%2F300kbps%2Ftrack.m4v'),
+        new CmcdNextRangeRequest('12323-48763'),
+        new CmcdObjectType(CmcdObjectTypeToken.VideoOnly),
+        new CmcdPlaybackRate(1.08),
+        new CmcdRequestedMaximumThroughput(12000),
+        new CmcdStreamingFormat(CmcdStreamingFormatToken.MpegDash),
+        new CmcdSessionId('6e2fb550-c457-11e9-bb97-0800200c9a66'),
+        new CmcdStreamType(CmcdStreamTypeToken.Vod),
+        new CmcdStartup(true),
+        new CmcdTopBitrate(6000),
+        new CmcdVersion(1),
+      ];
+      expect(cmcdDataToUrlParameter(cmcdObjects)).toEqual(
+        'CMCD=bl%3D21300%2Cbr%3D3200%2Cbs%2Ccid%3D%22faec5fc2-ac30-11ea-bb37-0242ac130002%22%2Cd%3D4004%2Cdl%3D18500%2Cmtp%3D48100%2Cnor%3D%22..%252F300kbps%252Ftrack.m4v%22%2Cnrr%3D%2212323-48763%22%2Cot%3Dv%2Cpr%3D1.08%2Crtp%3D12000%2Csf%3Dd%2Csid%3D%226e2fb550-c457-11e9-bb97-0800200c9a66%22%2Cst%3Dv%2Csu%2Ctb%3D6000'
+      );
+      expect(cmcdDataToHeader(cmcdObjects)).toEqual({
+        'CMCD-Request': 'bl=21300,dl=18500,mtp=48100,nor="..%2F300kbps%2Ftrack.m4v",nrr="12323-48763",su',
+        'CMCD-Object': 'br=3200,d=4004,ot=v,tb=6000',
+        'CMCD-Status': 'bs,rtp=12000',
+        'CMCD-Session':
+          'cid="faec5fc2-ac30-11ea-bb37-0242ac130002",pr=1.08,sf=d,sid="6e2fb550-c457-11e9-bb97-0800200c9a66",st=v',
+      });
     });
   });
 });
