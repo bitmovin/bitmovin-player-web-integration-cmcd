@@ -8,6 +8,9 @@ import {
   CmcdMeasuredThroughput,
   CmcdObjectType,
   CmcdObjectTypeToken,
+  CmcdPlaybackRate,
+  CmcdVersion,
+  CmcdVersionNumbers,
   cmcdDataToHeader,
   cmcdDataToUrlParameter,
 } from '../../src/ts/Cmcd';
@@ -126,6 +129,20 @@ describe('Cmcd', () => {
       expect(new CmcdMeasuredThroughput(87654).keyValuePairToString()).toEqual('mtp=87700');
       expect(new CmcdMeasuredThroughput(87650).keyValuePairToString()).toEqual('mtp=87700');
       expect(new CmcdMeasuredThroughput(87649).keyValuePairToString()).toEqual('mtp=87600');
+    });
+
+    it('should remove playback rate if value is 1', () => {
+      expect(new CmcdPlaybackRate(1).keyValuePairToString()).toEqual('');
+    });
+
+    it('should add playback rate if value is not 1', () => {
+      expect(new CmcdPlaybackRate(1.08).keyValuePairToString()).toEqual('pr=1.08');
+      expect(new CmcdPlaybackRate(0).keyValuePairToString()).toEqual('pr=0');
+      expect(new CmcdPlaybackRate(2.52).keyValuePairToString()).toEqual('pr=2.52');
+    });
+
+    it('should remove CMCD version if value is 1', () => {
+      expect(new CmcdVersion(CmcdVersionNumbers.v1).keyValuePairToString()).toEqual('');
     });
   });
 });
