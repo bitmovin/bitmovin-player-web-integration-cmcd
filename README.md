@@ -3,13 +3,9 @@
 This project adds support for the Common Media Client Data (CMCD) plugin. Please find more information about the Consumer Technology Association (CTA) Specification in https://cdn.cta.tech/cta/media/media/resources/standards/pdfs/cta-5004-final.pdf
 
 ## Install
-Install with npm:
+Install with npm from this repository:
 ```
-npm install --save @bitmovin/player-integration-cmcd
-```
-Install with yarn:
-```
-yarn add @bitmovin/player-integration-cmcd
+npm install --save git+https://github.com/bitmovin/bitmovin-player-web-integration-cmcd.git
 ```
 
 ## Usage
@@ -28,6 +24,7 @@ const cmcdConfig: CmcdConfig = {
 };
 
 const cmcdIntegration = new CmcdIntegration(cmcdConfig);
+
 playerConfig.network = {
   preprocessHttpRequest: cmcdIntegration.preprocessHttpRequest,
   preprocessHttpResponse: cmcdIntegration.preprocessHttpResponse,
@@ -64,6 +61,15 @@ player.load(source);
    - Run `npm start` to start the dev server with a watch task and auto-reloading 
    - Run `npm run debug` to create a dev build bundle (non-minified, with source maps)
    - Run `npm run build` to create a production bundle (minified)
+   - Run `npm run format` to format all files in the `src/` and `test/` folders
+
+### Preparing a release
+1. Bump version in `package.json` and `package-lock.json`
+2. Use `npx kacl release` to automatically create the release in the `CHANGELOG.md` file out of the `Unreleased` section
+3. Run `npm run build`
+4. Commit all the above changes, including the `dist/` folder
+5. Tag the commit of the release (which contains the changes of the `dist/` folder), e.g. with `1.0.0`
+
 
 ## Principles
 - The Bitmovin Player shall not be packaged into the JS file created by the build of this integration. To achieve this, types can be imported and used, but no code must be imported/used (including string enums!)
