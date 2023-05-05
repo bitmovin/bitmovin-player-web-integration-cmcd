@@ -79,7 +79,19 @@ type IntegerMilliSecs = number;
 function prepareCmcdData(data: CmcdBase[]): CmcdBase[] {
   // 9. Key-value pairs SHOULD be sequenced in alphabetical order of the key name in
   // order to reduce the fingerprinting surface exposed by the player.
-  const sortedData = data.sort((a: CmcdBase, b: CmcdBase) => a.key.localeCompare(b.key));
+  const sortedData = data.sort((a: CmcdBase, b: CmcdBase) => {
+    /**
+     * Custom key names may be used, but they MUST carry a hyphenated prefix to ensure
+     * that there will not be a namespace collision with future revisions to this
+     * specification. Clients SHOULD use a reverse-DNS syntax when defining their own
+     * prefix.
+     *
+     * Not fully obvious in the specification, but prefixes should be ignored in sorting keys.
+     */
+    const aKey = a.key.substring(a.key.lastIndexOf('-') + 1);
+    const bKey = b.key.substring(b.key.lastIndexOf('-') + 1);
+    return aKey.localeCompare(bKey);
+  });
 
   // remove empty strings, i.e. keys that should be omitted due to their value (ex: version=1)
   return sortedData.filter((obj) => obj.keyValuePairToString());
@@ -152,7 +164,7 @@ export function cmcdDataToJson(data: CmcdBase[]): string {
  */
 export abstract class CmcdBase {
   public readonly value: unknown;
-  public abstract readonly key: CmcdKeysToken;
+  public abstract readonly key: CmcdKeysToken | string;
   public abstract readonly type: CmcdHeaderType;
 
   constructor(value: unknown) {
@@ -544,6 +556,28 @@ export class CmcdVersion extends CmcdBase {
 
   override keyValuePairToString() {
     return this.value === CmcdVersionNumbers.v1 ? `` : `${this.key}=${this.value}`;
+  }
+}
+
+export class CmcdCustomKey extends CmcdBase {
+  public readonly key: string;
+  // TODO: Not fully clear if this would always be CmcdHeaderType.Session, to be verified
+  public readonly type = CmcdHeaderType.Session;
+
+  constructor(key: string, value: string | number) {
+    super(value);
+
+    /**
+     * Custom key names
+     * may be used, but they MUST carry a hyphenated prefix to ensure that there will
+     * not be a namespace collision with future revisions to this specification. Clients
+     * SHOULD use a reverse-DNS syntax when defining their own prefix.
+     */
+    const regexMatches = key.match(/^(.*-)(.*)$/);
+    if (!regexMatches || !regexMatches[2]) {
+      throw new Error('Custom key names MUST carry a hyphenated prefix (and SHOULD use a reverse-DNS syntax)');
+    }
+    this.key = key;
   }
 }
 

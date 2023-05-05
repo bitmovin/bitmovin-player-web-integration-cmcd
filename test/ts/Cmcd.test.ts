@@ -3,6 +3,7 @@ import {
   CmcdBufferLength,
   CmcdBufferStarvation,
   CmcdContentId,
+  CmcdCustomKey,
   CmcdDeadline,
   CmcdEncodedBitrate,
   CmcdMeasuredThroughput,
@@ -213,6 +214,21 @@ describe('Cmcd', () => {
       expect(cmcdDataToHeader(cmcdObjects)).toEqual({
         'CMCD-Status': 'bs',
         'CMCD-Request': 'su',
+      });
+    });
+
+    it('Section 6, Example #5:', () => {
+      const cmcdObjects = [
+        new CmcdObjectDuration(4004),
+        new CmcdCustomKey('com.example-myNumericKey', 500),
+        new CmcdCustomKey('com.example-myStringKey', 'myStringValue'),
+      ];
+      expect(cmcdDataToUrlParameter(cmcdObjects)).toEqual(
+        'CMCD=d%3D4004%2Ccom.example-myNumericKey%3D500%2Ccom.example-myStringKey%3D%22myStringValue%22'
+      );
+      expect(cmcdDataToHeader(cmcdObjects)).toEqual({
+        'CMCD-Object': 'd=4004',
+        'CMCD-Session': 'com.example-myNumericKey=500,com.example-myStringKey="myStringValue"',
       });
     });
 
