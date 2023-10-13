@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](http://semver.org/).
 
 ## [Unreleased]
 
+## 0.2.0 - 2023-10-13
+### Added
+- Support for adding Custom Keys statically in the configuraiton
+
 ## 0.1.0 - 2023-05-05
 ### Added
 - Initial CMCD release (Beta)
