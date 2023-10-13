@@ -9,15 +9,27 @@
  * - TimedTextTrack (ObjectType `tt`) is currently not used
  */
 import { AudioAdaptationData, HttpRequest, HttpRequestType, HttpResponse, HttpResponseBody, PlayerAPI, VideoAdaptationData } from 'bitmovin-player';
+import { CmcdCustomKey } from './Cmcd';
+export { CmcdCustomKey as CustomKey } from './Cmcd';
 export interface CmcdConfig {
     sessionId?: string;
     contentId?: string;
     useQueryArgs?: boolean;
+    /**
+     * Allows to set custom keys, which will be appended to all requests.
+     * This list is static and cannot be changed during run-time.
+     *
+     * Please note that custom key names MUST carry a hyphenated prefix to ensure
+     * that there won't be a namespace collision with future revisions of CMCD.
+     * The prefix SHOULD also use a reverse-DNS syntax.
+     */
+    customKeys?: CmcdCustomKey[];
 }
 export declare class CmcdIntegration {
     private sessionId;
     private contentId;
     private useQueryArgs;
+    private customKeys;
     private player?;
     private stalledSinceLastRequest;
     private currentVideoQuality;
