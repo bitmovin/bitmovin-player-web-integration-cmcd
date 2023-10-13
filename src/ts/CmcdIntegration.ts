@@ -19,7 +19,7 @@ import {
   SegmentInfo,
   VideoAdaptationData,
 } from 'bitmovin-player';
-import type { CmcdBase } from './Cmcd';
+import { CmcdBase, CmcdCustomKey } from './Cmcd';
 import {
   CmcdBufferLength,
   CmcdBufferStarvation,
@@ -48,16 +48,28 @@ import {
   CmcdVersionNumbers,
 } from './Cmcd';
 
+export { CmcdCustomKey as CustomKey } from './Cmcd';
+
 export interface CmcdConfig {
   sessionId?: string;
   contentId?: string;
   useQueryArgs?: boolean;
+  /**
+   * Allows to set custom keys, which will be appended to all requests.
+   * This list is static and cannot be changed during run-time.
+   *
+   * Please note that custom key names MUST carry a hyphenated prefix to ensure
+   * that there won't be a namespace collision with future revisions of CMCD.
+   * The prefix SHOULD also use a reverse-DNS syntax.
+   */
+  customKeys?: CmcdCustomKey[];
 }
 
 export class CmcdIntegration {
   private sessionId: string;
   private contentId: string;
   private useQueryArgs: boolean;
+  private customKeys: CmcdCustomKey[];
   private player?: PlayerAPI;
   private stalledSinceLastRequest: boolean;
   private currentVideoQuality: { bandwidth: number; id: string } | null;
@@ -71,6 +83,7 @@ export class CmcdIntegration {
     this.useQueryArgs = config.useQueryArgs || false;
     this.sessionId = config.sessionId || '';
     this.contentId = config.contentId || '';
+    this.customKeys = config.customKeys || [];
     this.stalledSinceLastRequest = false;
     this.currentVideoQuality = null;
     this.currentAudioQuality = null;
@@ -187,6 +200,10 @@ export class CmcdIntegration {
     data.concat(this.getRequestedMaximumThroughput(data));
 
     // TODO: data.push(new CmcdNextRangeRequest('byte-range'));
+
+    for (const customKey of this.customKeys) {
+      data.push(customKey);
+    }
 
     return data;
   }
