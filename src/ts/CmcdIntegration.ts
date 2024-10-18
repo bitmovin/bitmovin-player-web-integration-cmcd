@@ -315,12 +315,16 @@ export class CmcdIntegration {
     }
 
     if (this.currentVideoQuality) {
-      const allSegments = this.player.getAvailableSegments();
-      for (const mimeType in allSegments) {
-        if (mimeType.startsWith('video/')) {
-          const segments = allSegments[mimeType][this.currentVideoQuality.id];
-          data = data.concat(this.getNextObjectAndObjectDurationCmcdData(segments, request.url));
+      try {
+        const allSegments = this.player.getAvailableSegments();
+        for (const mimeType in allSegments) {
+          if (mimeType.startsWith('video/')) {
+            const segments = allSegments[mimeType][this.currentVideoQuality.id];
+            data = data.concat(this.getNextObjectAndObjectDurationCmcdData(segments, request.url));
+          }
         }
+      } catch (error) {
+        console.error('Error processing audio segments:', error);
       }
     }
 
@@ -362,12 +366,16 @@ export class CmcdIntegration {
     }
 
     if (this.currentVideoQuality) {
-      const allSegments = this.player.getAvailableSegments();
-      for (const mimeType in allSegments) {
-        if (mimeType.startsWith('video/')) {
-          const segments = allSegments[mimeType][this.currentVideoQuality.id];
-          data = data.concat(this.getNextObjectAndObjectDurationCmcdData(segments, request.url));
+      try {
+        const allSegments = this.player.getAvailableSegments();
+        for (const mimeType in allSegments) {
+          if (mimeType.startsWith('video/')) {
+            const segments = allSegments[mimeType][this.currentVideoQuality.id];
+            data = data.concat(this.getNextObjectAndObjectDurationCmcdData(segments, request.url));
+          }
         }
+      } catch (error) {
+        console.error('Error processing video segments:', error);
       }
     }
 
