@@ -120,9 +120,12 @@ export class CmcdIntegration {
     const data = this.gatherCmcdData(type, request);
 
     if (this.useQueryArgs) {
+      const url = new URL(request.url);
+      url.searchParams.delete('CMCD');
+
       const cmcdStr = cmcdDataToUrlParameter(data);
-      const separator = request.url.includes('?') ? '&' : '?';
-      request.url = `${request.url}${separator}${cmcdStr}`;
+      const separator = url.toString().includes('?') ? '&' : '?';
+      request.url = `${url.toString()}${separator}${cmcdStr}`;
     } else {
       const cmcdHeaders = cmcdDataToHeader(data);
 
