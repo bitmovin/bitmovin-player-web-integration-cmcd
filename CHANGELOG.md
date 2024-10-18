@@ -6,6 +6,9 @@ The format is based on [Keep a Changelog](http://keepachangelog.com/)
 and this project adheres to [Semantic Versioning](http://semver.org/).
 
 ## [Unreleased]
+### Fixed
+- DASH loading failure when SegmentTimeline with $number format is used (#6)
+- Duplicate CMCD query parameters for Live manifest (#5)
 
 ## 0.2.0 - 2023-10-13
 ### Added
