@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](http://semver.org/).
 ### Fixed
 - DASH loading failure when SegmentTimeline with $number format is used (#6)
 - Duplicate CMCD query parameters for Live manifest (#5)
+- Add `main` property to pacakge.json to enable usage in Jest tests
 
 ## 0.2.0 - 2023-10-13
 ### Added
