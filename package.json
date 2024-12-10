@@ -4,6 +4,7 @@
   "description": "",
   "types": "dist/js/CmcdIntegration.d.ts",
   "browser": "dist/js/bitmovin-player-integration-cmcd.js",
+  "main": "dist/js/bitmovin-player-integration-cmcd.js",
   "repository": {
     "type": "git",
     "url": "ssh://git@github.com:bitmovin/bitmovin-player-web-integration-cmcd.git"
