@@ -1,6 +1,6 @@
 {
   "name": "@bitmovin/player-web-integration-cmcd",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "",
   "types": "dist/js/CmcdIntegration.d.ts",
   "browser": "dist/js/bitmovin-player-integration-cmcd.js",
