@@ -61,6 +61,11 @@ jobs:
           git push origin main
           git push origin --tags
 
+      - name: build and publish
+        run: |
+          echo "//registry.npmjs.org/:_authToken=${{ secrets.NPM_AUTH_TOKEN }}" > ~/.npmrc
+          npm publish
+
       - name: Create GitHub release
         uses: softprops/action-gh-release@v2
         with:

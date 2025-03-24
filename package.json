@@ -1,7 +1,7 @@
 {
   "name": "@bitmovin/player-web-integration-cmcd",
   "version": "0.2.1",
-  "description": "",
+  "description": "Conviva analytics integration for the Bitmovin Player",
   "types": "dist/js/CmcdIntegration.d.ts",
   "browser": "dist/js/bitmovin-player-integration-cmcd.js",
   "main": "dist/js/bitmovin-player-integration-cmcd.js",
