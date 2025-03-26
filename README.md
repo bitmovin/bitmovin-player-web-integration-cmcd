@@ -3,9 +3,9 @@
 This project adds support for the Common Media Client Data (CMCD) plugin. Please find more information about the Consumer Technology Association (CTA) Specification in https://cdn.cta.tech/cta/media/media/resources/standards/pdfs/cta-5004-final.pdf
 
 ## Install
-Install with npm from this repository:
+Install with npm:
 ```
-npm install --save git+https://github.com/bitmovin/bitmovin-player-web-integration-cmcd.git
+npm install --save @bitmovin/player-web-integration-cmcd
 ```
 
 ## Usage
@@ -45,7 +45,7 @@ After that, you create a Bitmovin Player instance as usual, then pass the player
 cmcdIntegration.setPlayer(player);
 ```
 
-It is recommend to set the CMCD Session ID to the Analytics Impression ID as this enabled you to connect CDN logs with CMCD data to Analytics sessions:
+It is recommended to set the CMCD Session ID to the Analytics Impression ID as this enables you to connect CDN logs with CMCD data to Analytics sessions:
 ```js
 cmcdIntegration.setSessionId(player.analytics.getCurrentImpressionId());
 ```
@@ -64,12 +64,10 @@ player.load(source);
    - Run `npm run format` to format all files in the `src/` and `test/` folders
 
 ### Preparing a release
-1. Bump version in `package.json` and `package-lock.json`
-2. Use `npx kacl release` to automatically create the release in the `CHANGELOG.md` file out of the `Unreleased` section
-3. Run `npm run build`
-4. Commit all the above changes, including the `dist/` folder
-5. Tag the commit of the release (which contains the changes of the `dist/` folder), e.g. with `1.0.0`
+1. Make sure all relevant changes were merged into the `main` branch, and there is an entry for each change in `CHANGELOG.md`
+2. Use the [Release New Version](https://github.com/bitmovin/bitmovin-player-web-integration-cmcd/actions/workflows/release.yml) Github Action Workflow and run it on the `main` branch
 
+That's it! The workflow will take care of bumping the version (based on Changelog entries), updating the `CHANGELOG.md` file with release date and version, committing and tagging in this repository, and publishing the package to [NPM](https://www.npmjs.com/package/@bitmovin/player-web-integration-cmcd).
 
 ## Principles
 - The Bitmovin Player shall not be packaged into the JS file created by the build of this integration. To achieve this, types can be imported and used, but no code must be imported/used (including string enums!)
