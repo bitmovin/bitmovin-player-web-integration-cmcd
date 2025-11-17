@@ -86,10 +86,10 @@ function prepareCmcdData(data: CmcdBase[]): CmcdBase[] {
      * specification. Clients SHOULD use a reverse-DNS syntax when defining their own
      * prefix.
      *
-     * Not fully obvious in the specification, but prefixes should be ignored in sorting keys.
+     * Keys are sorted in strict alphabetical order using the full key name per the specification.
      */
-    const aKey = a.key.substring(a.key.lastIndexOf('-') + 1);
-    const bKey = b.key.substring(b.key.lastIndexOf('-') + 1);
+    const aKey = a.key;
+    const bKey = b.key;
     return aKey.localeCompare(bKey);
   });
 
