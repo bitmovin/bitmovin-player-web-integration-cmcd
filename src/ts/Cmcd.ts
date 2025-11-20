@@ -80,17 +80,7 @@ function prepareCmcdData(data: CmcdBase[]): CmcdBase[] {
   // 9. Key-value pairs SHOULD be sequenced in alphabetical order of the key name in
   // order to reduce the fingerprinting surface exposed by the player.
   const sortedData = data.sort((a: CmcdBase, b: CmcdBase) => {
-    /**
-     * Custom key names may be used, but they MUST carry a hyphenated prefix to ensure
-     * that there will not be a namespace collision with future revisions to this
-     * specification. Clients SHOULD use a reverse-DNS syntax when defining their own
-     * prefix.
-     *
-     * Not fully obvious in the specification, but prefixes should be ignored in sorting keys.
-     */
-    const aKey = a.key.substring(a.key.lastIndexOf('-') + 1);
-    const bKey = b.key.substring(b.key.lastIndexOf('-') + 1);
-    return aKey.localeCompare(bKey);
+    return a.key.localeCompare(b.key);
   });
 
   // remove empty strings, i.e. keys that should be omitted due to their value (ex: version=1)
