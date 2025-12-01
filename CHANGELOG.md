@@ -6,6 +6,9 @@ The format is based on [Keep a Changelog](http://keepachangelog.com/)
 and this project adheres to [Semantic Versioning](http://semver.org/).
 
 ## [Unreleased]
+### Changed
+- Dependency versions
+
 ### Fixed
 - Custom keys were not sorted alphabetically using the prefix due to an initial ambiguity in the specification
 
@@ -17,11 +20,11 @@ and this project adheres to [Semantic Versioning](http://semver.org/).
 ### Fixed
 - DASH loading failure when SegmentTimeline with $number format is used (#6)
 - Duplicate CMCD query parameters for Live manifest (#5)
-- Add `main` property to pacakge.json to enable usage in Jest tests
+- Add `main` property to package.json to enable usage in Jest tests
 
 ## [0.2.0] - 2023-10-13
 ### Added
-- Support for adding Custom Keys statically in the configuraiton
+- Support for adding Custom Keys statically in the configuration
 
 ## 0.1.0 - 2023-05-05
 ### Added
