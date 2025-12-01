@@ -200,7 +200,7 @@ export class CmcdIntegration {
       data = data.concat(this.getVideoSegmentRequestSpecificData(request));
     }
 
-    data.concat(this.getRequestedMaximumThroughput(data));
+    data.push(...this.getRequestedMaximumThroughput(data));
 
     // TODO: data.push(new CmcdNextRangeRequest('byte-range'));
 

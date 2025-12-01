@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](http://semver.org/).
 
 ## [Unreleased]
 
+
+### Fixed
+- Fixed: [CMCD] Fix Sorting of Keys (SOL-5872)
+
 ## [0.4.0] - 2025-12-01
 ### Changed
 - Dependency versions
