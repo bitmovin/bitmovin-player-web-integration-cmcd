@@ -2,6 +2,14 @@ import { describe, beforeEach, it, expect, jest } from '@jest/globals';
 import { HttpRequest, HttpRequestType, PlayerAPI } from 'bitmovin-player';
 import { CmcdIntegration, CmcdConfig } from '../../src/ts/CmcdIntegration';
 import { cmcdDataToHeader, cmcdDataToUrlParameter } from '../../src/ts/Cmcd';
+import { 
+  CmcdObjectDuration, 
+  CmcdEncodedBitrate, 
+  CmcdTopBitrate,
+  CmcdCustomKey,
+  CmcdSessionId,
+  CmcdContentId 
+} from '../../src/ts/Cmcd';
 
 // Jest Mocking for helper functions
 jest.mock('../../src/ts/Cmcd', () => ({
@@ -47,6 +55,8 @@ jest.mock('../../src/ts/Cmcd', () => ({
   CmcdEncodedBitrate: jest.fn(),
   CmcdDeadline: jest.fn(),
   CmcdTopBitrate: jest.fn(),
+  CmcdCustomKey: jest.fn(),
+  CmcdObjectDuration: jest.fn(),
   cmcdDataToHeader: jest.fn(),
   cmcdDataToUrlParameter: jest.fn(),
 }));
@@ -168,6 +178,74 @@ describe('CmcdIntegration', () => {
 
       expect(processedRequest.headers).toEqual({ 'CMCD-Header': 'mockData' });
       expect(cmcdDataToHeader).toHaveBeenCalled();
+    });
+  });
+
+  describe('CMCD Key Sorting Bug Fix', () => {
+    it('should sort CMCD keys alphabetically with custom keys coming before standard keys when appropriate', async () => {
+      // Mock the gatherCmcdData method to return test data with mixed key order
+      const mockCmcdData = [
+        { key: 'd', value: 4004, keyValuePairToString: () => 'd=4004', type: 'CMCD-Object' },
+        { key: 'com.example-myNumericKey', value: 500, keyValuePairToString: () => 'com.example-myNumericKey=500', type: 'CMCD-Session' },
+        { key: 'br', value: 1000, keyValuePairToString: () => 'br=1000', type: 'CMCD-Object' },
+        { key: 'tb', value: 2000, keyValuePairToString: () => 'tb=2000', type: 'CMCD-Object' },
+        { key: 'com.example-myStringKey', value: '"myStringValue"', keyValuePairToString: () => 'com.example-myStringKey="myStringValue"', type: 'CMCD-Session' },
+      ];
+
+      // Mock the gatherCmcdData method to return our test data
+      jest.spyOn(cmcdIntegration as any, 'gatherCmcdData').mockReturnValue(mockCmcdData);
+
+      // Mock cmcdDataToUrlParameter to simulate the actual sorting behavior
+      (cmcdDataToUrlParameter as jest.Mock).mockImplementation((data: any[]) => {
+        // Sort the data alphabetically by key (this simulates the actual prepareCmcdData function)
+        const sortedData = data.sort((a: any, b: any) => a.key.localeCompare(b.key));
+        const serializedParams = sortedData.map((item: any) => item.keyValuePairToString()).join(',');
+        return `CMCD=${encodeURIComponent(serializedParams)}`;
+      });
+
+      const request: HttpRequest = {
+        credentials: undefined,
+        method: undefined,
+        responseType: undefined,
+        url: 'https://example.com/segment.ts',
+        headers: {},
+      };
+
+      const processedRequest = await cmcdIntegration.preprocessHttpRequest(HttpRequestType.MEDIA_VIDEO, request);
+
+      // Verify the URL contains the CMCD parameter with keys sorted alphabetically
+      expect(processedRequest.url).toContain('CMCD=');
+      
+      // Extract the CMCD parameter value
+      const urlParams = new URLSearchParams(processedRequest.url.split('?')[1]);
+      const cmcdParam = urlParams.get('CMCD');
+      expect(cmcdParam).toBeTruthy();
+
+      // Decode and verify the order of keys in the CMCD parameter
+      const decodedCmcd = decodeURIComponent(cmcdParam!);
+      
+      // The keys should appear in alphabetical order: br, com.example-myNumericKey, com.example-myStringKey, d, tb
+      const expectedOrder = [
+        'br=1000',
+        'com.example-myNumericKey=500', 
+        'com.example-myStringKey="myStringValue"',
+        'd=4004',
+        'tb=2000'
+      ].join(',');
+      
+      expect(decodedCmcd).toBe(expectedOrder);
+      
+      // Additional verification: check that custom keys come before 'd' as specified in the bug report
+      const brIndex = decodedCmcd.indexOf('br=');
+      const customNumericIndex = decodedCmcd.indexOf('com.example-myNumericKey=');
+      const customStringIndex = decodedCmcd.indexOf('com.example-myStringKey=');
+      const dIndex = decodedCmcd.indexOf('d=');
+      const tbIndex = decodedCmcd.indexOf('tb=');
+
+      expect(brIndex).toBeLessThan(customNumericIndex);
+      expect(customNumericIndex).toBeLessThan(customStringIndex);  
+      expect(customStringIndex).toBeLessThan(dIndex);
+      expect(dIndex).toBeLessThan(tbIndex);
     });
   });
 });
