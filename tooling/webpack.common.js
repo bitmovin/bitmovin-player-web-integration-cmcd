@@ -1,5 +1,4 @@
 const path = require('path');
-const webpack = require('webpack');
 
 const integrationName = 'Cmcd';
 
@@ -24,7 +23,7 @@ module.exports = {
     library: {
       amd: `BitmovinPlayerIntegration${integrationName}`,
       commonjs: `BitmovinPlayerIntegration${integrationName}`,
-      root: ['bitmovin', 'player', 'integration', integrationName.toLowerCase()],
+      root: ['bitmovin', 'player', 'integration', integrationName],
     },
   },
   target: ['web', 'es5'],

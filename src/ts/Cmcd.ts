@@ -79,7 +79,9 @@ type IntegerMilliSecs = number;
 function prepareCmcdData(data: CmcdBase[]): CmcdBase[] {
   // 9. Key-value pairs SHOULD be sequenced in alphabetical order of the key name in
   // order to reduce the fingerprinting surface exposed by the player.
-  const sortedData = data.sort((a: CmcdBase, b: CmcdBase) => a.key.localeCompare(b.key));
+  const sortedData = data.sort((a: CmcdBase, b: CmcdBase) => {
+    return a.key.localeCompare(b.key);
+  });
 
   // remove empty strings, i.e. keys that should be omitted due to their value (ex: version=1)
   return sortedData.filter((obj) => obj.keyValuePairToString());
@@ -138,7 +140,7 @@ export function cmcdDataToUrlParameter(data: CmcdBase[]): string {
 
   // 10. If the data payload is transmitted as a query argument, then the entire payload
   // string MUST be URLEncoded per [5].
-  return `CMCD=${encodeURI(cmcdString)}`;
+  return `CMCD=${encodeURIComponent(cmcdString)}`;
 }
 
 export function cmcdDataToJson(data: CmcdBase[]): string {
@@ -152,7 +154,7 @@ export function cmcdDataToJson(data: CmcdBase[]): string {
  */
 export abstract class CmcdBase {
   public readonly value: unknown;
-  public abstract readonly key: CmcdKeysToken;
+  public abstract readonly key: CmcdKeysToken | string;
   public abstract readonly type: CmcdHeaderType;
 
   constructor(value: unknown) {
@@ -166,6 +168,10 @@ export abstract class CmcdBase {
    */
   keyValuePairToString(): string {
     if (typeof this.value === 'string') {
+      if (!this.value) {
+        return '';
+      }
+
       // 7. Any value of type String MUST be enclosed by opening and closing double
       // quotes Unicode 0x22. Double quotes and backslashes MUST be escaped using a
       // backslash "\" Unicode 0x5C character. Any value of type Token does not require
@@ -543,6 +549,28 @@ export class CmcdVersion extends CmcdBase {
   }
 }
 
+export class CmcdCustomKey extends CmcdBase {
+  public readonly key: string;
+  // TODO: Not fully clear if this would always be CmcdHeaderType.Session, to be verified
+  public readonly type = CmcdHeaderType.Session;
+
+  constructor(key: string, value: string | number) {
+    super(value);
+
+    /**
+     * Custom key names
+     * may be used, but they MUST carry a hyphenated prefix to ensure that there will
+     * not be a namespace collision with future revisions to this specification. Clients
+     * SHOULD use a reverse-DNS syntax when defining their own prefix.
+     */
+    const regexMatches = key.match(/^(.*-)(.*)$/);
+    if (!regexMatches || !regexMatches[2]) {
+      throw new Error('Custom key names MUST carry a hyphenated prefix (and SHOULD use a reverse-DNS syntax)');
+    }
+    this.key = key;
+  }
+}
+
 /**
  * 7. Any value of type String MUST be enclosed by opening and closing double
  * quotes Unicode 0x22. Double quotes and backslashes MUST be escaped using a
@@ -556,5 +584,5 @@ function escapeCmcdString(str: string) {
   const doubleQuotesRegex = /"/g;
   const backslashRegex = /\\/g;
 
-  return `"${str.replace(backslashRegex, '\\').replace(doubleQuotesRegex, '\\"')}"`;
+  return `"${str.replace(backslashRegex, '\\\\').replace(doubleQuotesRegex, '\\"')}"`;
 }
