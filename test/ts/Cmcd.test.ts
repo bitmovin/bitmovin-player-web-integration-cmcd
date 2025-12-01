@@ -79,6 +79,55 @@ describe('Cmcd', () => {
     expect(cmcdUrlParams3).toEqual(cmcdUrlParams4);
   });
 
+  it('should sort custom keys alphabetically with standard keys according to full key name', () => {
+    const cmcdObjects = [
+      new CmcdObjectDuration(4004), // key: 'd'
+      new CmcdCustomKey('com.example-myNumericKey', 500), // key: 'com.example-myNumericKey'
+      new CmcdCustomKey('com.example-myStringKey', 'myStringValue'), // key: 'com.example-myStringKey'
+    ];
+
+    const result = cmcdDataToUrlParameter(cmcdObjects);
+    
+    // Custom keys should come first alphabetically before 'd'
+    // Expected order: 'com.example-myNumericKey', 'com.example-myStringKey', 'd'
+    expect(result).toEqual('CMCD=com.example-myNumericKey%3D500%2Ccom.example-myStringKey%3D%22myStringValue%22%2Cd%3D4004');
+  });
+
+  it('should maintain strict alphabetical order regardless of input order with mixed custom and standard keys', () => {
+    const cmcdObjects1 = [
+      new CmcdObjectDuration(4004), // 'd'
+      new CmcdCustomKey('com.example-myKey', 500), // 'com.example-myKey' 
+      new CmcdBufferLength(0), // 'bl'
+    ];
+    
+    const cmcdObjects2 = [
+      new CmcdBufferLength(0), // 'bl'
+      new CmcdCustomKey('com.example-myKey', 500), // 'com.example-myKey'
+      new CmcdObjectDuration(4004), // 'd'
+    ];
+
+    const result1 = cmcdDataToUrlParameter(cmcdObjects1);
+    const result2 = cmcdDataToUrlParameter(cmcdObjects2);
+    
+    expect(result1).toEqual(result2);
+    // Should be: bl, com.example-myKey, d
+    expect(result1).toEqual('CMCD=bl%3D0%2Ccom.example-myKey%3D500%2Cd%3D4004');
+  });
+
+  it('should sort custom keys that come after standard keys alphabetically', () => {
+    const cmcdObjects = [
+      new CmcdBufferLength(100), // 'bl'
+      new CmcdCustomKey('z-custom-key', 'value'), // 'z-custom-key' - should come last
+      new CmcdObjectDuration(4004), // 'd'
+      new CmcdCustomKey('m-custom-key', 123), // 'm-custom-key' - should come between 'd' and 'z'
+    ];
+
+    const result = cmcdDataToUrlParameter(cmcdObjects);
+    
+    // Expected alphabetical order: bl, d, m-custom-key, z-custom-key
+    expect(result).toEqual('CMCD=bl%3D100%2Cd%3D4004%2Cm-custom-key%3D123%2Cz-custom-key%3D%22value%22');
+  });
+
   describe('Cmcd classes', () => {
     it('should ignore keys with empty string value', () => {
       expect(new CmcdContentId('').keyValuePairToString()).toEqual('');
@@ -224,7 +273,7 @@ describe('Cmcd', () => {
         new CmcdCustomKey('com.example-myStringKey', 'myStringValue'),
       ];
       expect(cmcdDataToUrlParameter(cmcdObjects)).toEqual(
-        'CMCD=d%3D4004%2Ccom.example-myNumericKey%3D500%2Ccom.example-myStringKey%3D%22myStringValue%22'
+        'CMCD=com.example-myNumericKey%3D500%2Ccom.example-myStringKey%3D%22myStringValue%22%2Cd%3D4004'
       );
       expect(cmcdDataToHeader(cmcdObjects)).toEqual({
         'CMCD-Object': 'd=4004',

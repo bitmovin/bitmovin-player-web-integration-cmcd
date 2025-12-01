@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](http://keepachangelog.com/)
 and this project adheres to [Semantic Versioning](http://semver.org/).
 
 ## [Unreleased]
+### Fixed
+- Custom keys were not sorted alphabetically using the prefix due to an initial ambiguity in the specification
 
 ## [0.3.0] - 2025-03-26
 ### Added
