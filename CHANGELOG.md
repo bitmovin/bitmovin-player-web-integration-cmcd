@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](http://keepachangelog.com/)
 and this project adheres to [Semantic Versioning](http://semver.org/).
 
 ## [Unreleased]
+
+## [0.5.0] - 2026-01-14
 ### Added
 - Option to set the CMCD header type per `CustomKey` to one of the predefined HTTP headers. This is required now for CustomKey's if `useQueryArgs` is set to `false` (HTTP Header mode is used).
 
@@ -34,7 +36,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/).
 ### Added
 - Initial CMCD release (Beta)
 
-[Unreleased]: https://github.com/bitmovin/bitmovin-player-web-integration-cmcd/compare/v0.4.0...HEAD
+[Unreleased]: https://github.com/bitmovin/bitmovin-player-web-integration-cmcd/compare/v0.5.0...HEAD
+[0.5.0]: https://github.com/bitmovin/bitmovin-player-web-integration-cmcd/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/bitmovin/bitmovin-player-web-integration-cmcd/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/bitmovin/bitmovin-player-web-integration-cmcd/compare/v0.2.1...v0.3.0
 [0.2.1]: https://github.com/bitmovin/bitmovin-player-web-integration-cmcd/compare/v0.2.0...v0.2.1
