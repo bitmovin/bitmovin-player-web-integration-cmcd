@@ -59,7 +59,7 @@ export declare enum CmcdKeysToken {
     TopBitrate = "tb",
     CmcdVersion = "v"
 }
-declare enum CmcdHeaderType {
+export declare enum CmcdHeaderType {
     Object = "CMCD-Object",
     Request = "CMCD-Request",
     Status = "CMCD-Status",
@@ -350,7 +350,7 @@ export declare class CmcdVersion extends CmcdBase {
 }
 export declare class CmcdCustomKey extends CmcdBase {
     readonly key: string;
-    readonly type = CmcdHeaderType.Session;
-    constructor(key: string, value: string | number);
+    readonly type: CmcdHeaderType;
+    constructor(key: string, value: string | number, headerType?: CmcdHeaderType);
 }
 export {};

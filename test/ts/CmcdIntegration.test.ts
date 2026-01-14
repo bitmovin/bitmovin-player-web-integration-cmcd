@@ -1,55 +1,30 @@
 import { describe, beforeEach, it, expect, jest } from '@jest/globals';
-import { HttpRequest, HttpRequestType, PlayerAPI } from 'bitmovin-player';
+import { HttpRequest, HttpRequestMethod, HttpRequestType, HttpResponseType, PlayerAPI } from 'bitmovin-player';
 import { CmcdIntegration, CmcdConfig } from '../../src/ts/CmcdIntegration';
-import { cmcdDataToHeader, cmcdDataToUrlParameter } from '../../src/ts/Cmcd';
+import { CmcdCustomKey, cmcdDataToHeader, cmcdDataToUrlParameter, CmcdHeaderType } from '../../src/ts/Cmcd';
 
 // Jest Mocking for helper functions
-jest.mock('../../src/ts/Cmcd', () => ({
-  CmcdVersionNumbers: {
-    v1: 1,
-  },
-  CmcdStreamTypeToken: {
-    Live: 'live',
-    Vod: 'vod',
-  },
-  CmcdObjectTypeToken: {
-    AudioOnly: 'a',
-    VideoOnly: 'v',
-    ManifestOrPlaylistTextFile: 'm',
-    InitSegment: 'i',
-    CaptionOrSubtitle: 'c',
-    CryptographicKeyOrLicenseOrCertificate: 'k',
-    MuxedVideoAudio: 'av',
-    Other: 'o',
-    TimedTextTrack: 'tt',
-  },
-  CmcdStreamingFormatToken: {
-    Hls: 'h',
-    MpegDash: 'd',
-    Smooth: 's',
-    Other: 'o',
-  },
-  CmcdKeysToken: {
-    EncodedBitrate: 'br',
-    ObjectDuration: 'd',
-    Startup: 'su',
-  },
-  CmcdVersion: jest.fn(),
-  CmcdStreamType: jest.fn(),
-  CmcdPlaybackRate: jest.fn(),
-  CmcdObjectType: jest.fn(),
-  CmcdStreamingFormat: jest.fn(),
-  CmcdStartup: jest.fn(),
-  CmcdBufferStarvation: jest.fn(),
-  CmcdBufferLength: jest.fn(),
-  CmcdContentId: jest.fn(),
-  CmcdSessionId: jest.fn(),
-  CmcdEncodedBitrate: jest.fn(),
-  CmcdDeadline: jest.fn(),
-  CmcdTopBitrate: jest.fn(),
-  cmcdDataToHeader: jest.fn(),
-  cmcdDataToUrlParameter: jest.fn(),
-}));
+jest.mock('../../src/ts/Cmcd', () => {
+  const actual = jest.requireActual<typeof import('../../src/ts/Cmcd')>('../../src/ts/Cmcd');
+  return {
+    ...actual,
+    CmcdVersion: jest.fn(),
+    CmcdStreamType: jest.fn(),
+    CmcdPlaybackRate: jest.fn(),
+    CmcdObjectType: jest.fn(),
+    CmcdStreamingFormat: jest.fn(),
+    CmcdStartup: jest.fn(),
+    CmcdBufferStarvation: jest.fn(),
+    CmcdBufferLength: jest.fn(),
+    CmcdContentId: jest.fn(),
+    CmcdSessionId: jest.fn(),
+    CmcdEncodedBitrate: jest.fn(),
+    CmcdDeadline: jest.fn(),
+    CmcdTopBitrate: jest.fn(),
+    cmcdDataToHeader: jest.fn(),
+    cmcdDataToUrlParameter: jest.fn(),
+  };
+});
 
 describe('CmcdIntegration', () => {
   let cmcdIntegration: CmcdIntegration;
@@ -112,12 +87,49 @@ describe('CmcdIntegration', () => {
     cmcdIntegration.setPlayer(mockPlayer);
   });
 
+  it('should throw an error if custom keys without headerType are added when useQueryArgs is false', async () => {
+    config.useQueryArgs = false;
+    config.customKeys = [new CmcdCustomKey('com.example-myCustomKey', 'value')];
+
+    expect(() => new CmcdIntegration(config)).toThrowError();
+  });
+
+  it('should not throw an error if custom keys with headerType are added when useQueryArgs is false', async () => {
+    config.useQueryArgs = false;
+    config.customKeys = [new CmcdCustomKey('com.example-myCustomKey', 'value', CmcdHeaderType.Request)];
+
+    expect(() => new CmcdIntegration(config)).not.toThrowError();
+  });
+
+  it('should not throw an error if custom keys without headerType are added when useQueryArgs is true', async () => {
+    config.useQueryArgs = true;
+    config.customKeys = [new CmcdCustomKey('com.example-myCustomKey', 'value')];
+    expect(() => new CmcdIntegration(config)).not.toThrowError();
+  });
+
+  it('should not throw an error if custom keys with headerType are added when useQueryArgs is true', async () => {
+    config.useQueryArgs = true;
+    config.customKeys = [new CmcdCustomKey('com.example-myCustomKey', 'value', CmcdHeaderType.Request)];
+    expect(() => new CmcdIntegration(config)).not.toThrowError();
+  });
+
+  it('should throw an error if at least on custom key without headerType is added when useQueryArgs is false', async () => {
+    config.useQueryArgs = false;
+    config.customKeys = [
+      new CmcdCustomKey('com.example-myCustomKey1', 'value1', CmcdHeaderType.Status),
+      new CmcdCustomKey('com.example-myCustomKey2', 'value2'),
+      new CmcdCustomKey('com.example-myCustomKey3', 'value3', CmcdHeaderType.Request),
+    ];
+
+    expect(() => new CmcdIntegration(config)).toThrowError();
+  });
+
   describe('preprocessHttpRequest', () => {
     it('should add CMCD data as query parameters when useQueryArgs is true', async () => {
       const request: HttpRequest = {
-        credentials: undefined,
-        method: undefined,
-        responseType: undefined,
+        credentials: 'omit',
+        method: HttpRequestMethod.GET,
+        responseType: HttpResponseType.ARRAYBUFFER,
         url: 'https://example.com/manifest.m3u8',
         headers: {},
       };
@@ -135,9 +147,9 @@ describe('CmcdIntegration', () => {
 
     it('should remove existing CMCD query parameters before adding new ones', async () => {
       const request: HttpRequest = {
-        credentials: undefined,
-        method: undefined,
-        responseType: undefined,
+        credentials: 'omit',
+        method: HttpRequestMethod.GET,
+        responseType: HttpResponseType.ARRAYBUFFER,
         url: 'https://example.com/manifest.m3u8?CMCD=oldData',
         headers: {},
       };
@@ -155,9 +167,9 @@ describe('CmcdIntegration', () => {
       cmcdIntegration.setPlayer(mockPlayer);
 
       const request: HttpRequest = {
-        credentials: undefined,
-        method: undefined,
-        responseType: undefined,
+        credentials: 'omit',
+        method: HttpRequestMethod.GET,
+        responseType: HttpResponseType.ARRAYBUFFER,
         url: 'https://example.com/manifest.m3u8?',
         headers: {},
       };

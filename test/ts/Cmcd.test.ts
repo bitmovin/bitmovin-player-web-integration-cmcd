@@ -6,6 +6,7 @@ import {
   CmcdCustomKey,
   CmcdDeadline,
   CmcdEncodedBitrate,
+  CmcdHeaderType,
   CmcdMeasuredThroughput,
   CmcdNextObjectRequest,
   CmcdNextRangeRequest,
@@ -87,19 +88,21 @@ describe('Cmcd', () => {
     ];
 
     const result = cmcdDataToUrlParameter(cmcdObjects);
-    
+
     // Custom keys should come first alphabetically before 'd'
     // Expected order: 'com.example-myNumericKey', 'com.example-myStringKey', 'd'
-    expect(result).toEqual('CMCD=com.example-myNumericKey%3D500%2Ccom.example-myStringKey%3D%22myStringValue%22%2Cd%3D4004');
+    expect(result).toEqual(
+      'CMCD=com.example-myNumericKey%3D500%2Ccom.example-myStringKey%3D%22myStringValue%22%2Cd%3D4004'
+    );
   });
 
   it('should maintain strict alphabetical order regardless of input order with mixed custom and standard keys', () => {
     const cmcdObjects1 = [
       new CmcdObjectDuration(4004), // 'd'
-      new CmcdCustomKey('com.example-myKey', 500), // 'com.example-myKey' 
+      new CmcdCustomKey('com.example-myKey', 500), // 'com.example-myKey'
       new CmcdBufferLength(0), // 'bl'
     ];
-    
+
     const cmcdObjects2 = [
       new CmcdBufferLength(0), // 'bl'
       new CmcdCustomKey('com.example-myKey', 500), // 'com.example-myKey'
@@ -108,7 +111,7 @@ describe('Cmcd', () => {
 
     const result1 = cmcdDataToUrlParameter(cmcdObjects1);
     const result2 = cmcdDataToUrlParameter(cmcdObjects2);
-    
+
     expect(result1).toEqual(result2);
     // Should be: bl, com.example-myKey, d
     expect(result1).toEqual('CMCD=bl%3D0%2Ccom.example-myKey%3D500%2Cd%3D4004');
@@ -123,7 +126,7 @@ describe('Cmcd', () => {
     ];
 
     const result = cmcdDataToUrlParameter(cmcdObjects);
-    
+
     // Expected alphabetical order: bl, d, m-custom-key, z-custom-key
     expect(result).toEqual('CMCD=bl%3D100%2Cd%3D4004%2Cm-custom-key%3D123%2Cz-custom-key%3D%22value%22');
   });
@@ -207,6 +210,34 @@ describe('Cmcd', () => {
     });
   });
 
+  describe('CmcdCustomKey', () => {
+    describe('with HTTP Header mode', () => {
+      it('should set the provided CmcdHeaderType correctly', () => {
+        const customKey1 = new CmcdCustomKey('com.example-myNumericKey1', 'value1', CmcdHeaderType.Object);
+        const customKey2 = new CmcdCustomKey('com.example-myNumericKey2', 'value2', CmcdHeaderType.Request);
+        const customKey3 = new CmcdCustomKey('com.example-myNumericKey3', 'value3', CmcdHeaderType.Session);
+        const customKey4 = new CmcdCustomKey('com.example-myNumericKey4', 'value4', CmcdHeaderType.Status);
+
+        expect(customKey1.type).toEqual(CmcdHeaderType.Object);
+        expect(customKey2.type).toEqual(CmcdHeaderType.Request);
+        expect(customKey3.type).toEqual(CmcdHeaderType.Session);
+        expect(customKey4.type).toEqual(CmcdHeaderType.Status);
+      });
+
+      it('should set invalid CmcdHeaderType to null', () => {
+        const customKey1 = new CmcdCustomKey('com.example-myNumericKey1', 'value1', 'invalid' as any);
+        const customKey2 = new CmcdCustomKey('com.example-myNumericKey2', 'value2', null as any);
+        const customKey3 = new CmcdCustomKey('com.example-myNumericKey3', 'value3', undefined as any);
+        const customKey4 = new CmcdCustomKey('com.example-myNumericKey4', 'value4', 2 as any);
+
+        expect(customKey1.type).toEqual(null);
+        expect(customKey2.type).toEqual(null);
+        expect(customKey3.type).toEqual(null);
+        expect(customKey4.type).toEqual(null);
+      });
+    });
+  });
+
   describe('CMCD Spec Examples', () => {
     // Examples from CMCD v1 spec Section 6 taken as test cases
 
@@ -269,8 +300,8 @@ describe('Cmcd', () => {
     it('Section 6, Example #5:', () => {
       const cmcdObjects = [
         new CmcdObjectDuration(4004),
-        new CmcdCustomKey('com.example-myNumericKey', 500),
-        new CmcdCustomKey('com.example-myStringKey', 'myStringValue'),
+        new CmcdCustomKey('com.example-myNumericKey', 500, CmcdHeaderType.Session),
+        new CmcdCustomKey('com.example-myStringKey', 'myStringValue', CmcdHeaderType.Session),
       ];
       expect(cmcdDataToUrlParameter(cmcdObjects)).toEqual(
         'CMCD=com.example-myNumericKey%3D500%2Ccom.example-myStringKey%3D%22myStringValue%22%2Cd%3D4004'

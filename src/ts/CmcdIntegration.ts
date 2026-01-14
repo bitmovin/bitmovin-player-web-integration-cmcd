@@ -19,11 +19,12 @@ import {
   SegmentInfo,
   VideoAdaptationData,
 } from 'bitmovin-player';
-import { CmcdBase, CmcdCustomKey } from './Cmcd';
 import {
+  CmcdBase,
   CmcdBufferLength,
   CmcdBufferStarvation,
   CmcdContentId,
+  CmcdCustomKey,
   cmcdDataToHeader,
   cmcdDataToUrlParameter,
   CmcdDeadline,
@@ -49,6 +50,7 @@ import {
 } from './Cmcd';
 
 export { CmcdCustomKey as CustomKey } from './Cmcd';
+export { CmcdHeaderType as HeaderType } from './Cmcd';
 
 export interface CmcdConfig {
   sessionId?: string;
@@ -91,6 +93,19 @@ export class CmcdIntegration {
     this.lastMeasuredThroughputAudio = 0;
     this.lastMeasuredThroughputVideo = 0;
     this.manifestType = null;
+
+    if (this.useQueryArgs === false && this.customKeys.length > 0) {
+      const customKeyWithoutHeaderType = this.customKeys
+        .filter((key) => key.type === null)
+        .map((customKey) => customKey.key);
+      if (customKeyWithoutHeaderType.length > 0) {
+        throw new Error(
+          'All custom keys must have an HTTP header type configured if HTTP header mode is used ' +
+            '(`CmcdConfig.useQueryArgs = false`), but is missing for ' +
+            customKeyWithoutHeaderType.join(', ')
+        );
+      }
+    }
   }
 
   public setPlayer(player: PlayerAPI) {

@@ -11,6 +11,7 @@
 import { AudioAdaptationData, HttpRequest, HttpRequestType, HttpResponse, HttpResponseBody, PlayerAPI, VideoAdaptationData } from 'bitmovin-player';
 import { CmcdCustomKey } from './Cmcd';
 export { CmcdCustomKey as CustomKey } from './Cmcd';
+export { CmcdHeaderType as HeaderType } from './Cmcd';
 export interface CmcdConfig {
     sessionId?: string;
     contentId?: string;

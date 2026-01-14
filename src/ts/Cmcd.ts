@@ -66,7 +66,7 @@ export enum CmcdKeysToken {
   CmcdVersion = 'v',
 }
 
-enum CmcdHeaderType {
+export enum CmcdHeaderType {
   Object = 'CMCD-Object',
   Request = 'CMCD-Request',
   Status = 'CMCD-Status',
@@ -551,10 +551,11 @@ export class CmcdVersion extends CmcdBase {
 
 export class CmcdCustomKey extends CmcdBase {
   public readonly key: string;
-  // TODO: Not fully clear if this would always be CmcdHeaderType.Session, to be verified
-  public readonly type = CmcdHeaderType.Session;
 
-  constructor(key: string, value: string | number) {
+  // Header type must be set if HTTP header mode is used (`CmcdConfig.useQueryArgs = false`)
+  public readonly type: CmcdHeaderType;
+
+  constructor(key: string, value: string | number, headerType?: CmcdHeaderType) {
     super(value);
 
     /**
@@ -567,7 +568,9 @@ export class CmcdCustomKey extends CmcdBase {
     if (!regexMatches || !regexMatches[2]) {
       throw new Error('Custom key names MUST carry a hyphenated prefix (and SHOULD use a reverse-DNS syntax)');
     }
+
     this.key = key;
+    this.type = Object.values(CmcdHeaderType).includes(headerType) ? headerType : null;
   }
 }
 

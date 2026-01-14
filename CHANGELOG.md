@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](http://keepachangelog.com/)
 and this project adheres to [Semantic Versioning](http://semver.org/).
 
 ## [Unreleased]
+### Added
+- Option to set the CMCD header type per `CustomKey` to one of the predefined HTTP headers. This is required now for CustomKey's if `useQueryArgs` is set to `false` (HTTP Header mode is used).
 
 ## [0.4.0] - 2025-12-01
 ### Changed
