@@ -30,7 +30,7 @@
     "changelog-parser": "^3.0.1",
     "husky": "^8.0.3",
     "jest": "^29.4.2",
-    "jest-environment-jsdom": "^29.4.2",
+    "jest-environment-jsdom": "^30.2.0",
     "kacl": "^1.1.1",
     "lint-staged": "^13.1.1",
     "prettier": "^2.8.4",
