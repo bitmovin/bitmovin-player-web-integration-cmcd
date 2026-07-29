@@ -67,6 +67,38 @@ export interface CmcdConfig {
   customKeys?: CmcdCustomKey[];
 }
 
+/**
+ * Appends the already URL encoded CMCD query argument to the given URL, replacing a
+ * previously present `CMCD` argument.
+ *
+ * The URL is manipulated as a string on purpose: parsing it into a `URL` and modifying
+ * its `searchParams` re-serializes all pre-existing query arguments and would therefore
+ * encode characters the origin might expect verbatim (e.g. `:` in `?date=2026-07-24T13:20:00Z`).
+ */
+function appendCmcdQueryArg(url: string, cmcdQueryArg: string): string {
+  const queryStart = url.indexOf('?');
+  const fragmentStart = url.indexOf('#');
+
+  // The CMCD argument has to be part of the query, so anything after the fragment
+  // delimiter is preserved as-is and re-appended at the end.
+  const fragment = fragmentStart === -1 ? '' : url.slice(fragmentStart);
+  const urlWithoutFragment = fragmentStart === -1 ? url : url.slice(0, fragmentStart);
+
+  if (queryStart === -1 || (fragmentStart !== -1 && queryStart > fragmentStart)) {
+    return `${urlWithoutFragment}?${cmcdQueryArg}${fragment}`;
+  }
+
+  const path = urlWithoutFragment.slice(0, queryStart);
+  const existingArgs = urlWithoutFragment
+    .slice(queryStart + 1)
+    .split('&')
+    .filter((arg) => arg !== '' && arg !== 'CMCD' && !arg.startsWith('CMCD='));
+
+  const query = [...existingArgs, cmcdQueryArg].join('&');
+
+  return `${path}?${query}${fragment}`;
+}
+
 export class CmcdIntegration {
   private sessionId: string;
   private contentId: string;
@@ -135,12 +167,7 @@ export class CmcdIntegration {
     const data = this.gatherCmcdData(type, request);
 
     if (this.useQueryArgs) {
-      const url = new URL(request.url);
-      url.searchParams.delete('CMCD');
-
-      const cmcdStr = cmcdDataToUrlParameter(data);
-      const separator = url.toString().includes('?') ? '&' : '?';
-      request.url = `${url.toString()}${separator}${cmcdStr}`;
+      request.url = appendCmcdQueryArg(request.url, cmcdDataToUrlParameter(data));
     } else {
       const cmcdHeaders = cmcdDataToHeader(data);
 

@@ -162,6 +162,60 @@ describe('CmcdIntegration', () => {
       expect(cmcdDataToUrlParameter).toHaveBeenCalled();
     });
 
+    it('should not re-encode pre-existing query parameters', async () => {
+      const request: HttpRequest = {
+        credentials: 'omit',
+        method: HttpRequestMethod.GET,
+        responseType: HttpResponseType.ARRAYBUFFER,
+        url: 'https://example.com/manifest.m3u8?ateme_date_begin=2026-07-24T13:20:00Z&token=a+b%2Fc',
+        headers: {},
+      };
+
+      (cmcdDataToUrlParameter as jest.Mock).mockReturnValue('CMCD=mockData');
+
+      const processedRequest = await cmcdIntegration.preprocessHttpRequest(HttpRequestType.MEDIA_VIDEO, request);
+
+      expect(processedRequest.url).toBe(
+        'https://example.com/manifest.m3u8?ateme_date_begin=2026-07-24T13:20:00Z&token=a+b%2Fc&CMCD=mockData'
+      );
+    });
+
+    it('should keep pre-existing query parameters when replacing an existing CMCD parameter', async () => {
+      const request: HttpRequest = {
+        credentials: 'omit',
+        method: HttpRequestMethod.GET,
+        responseType: HttpResponseType.ARRAYBUFFER,
+        url: 'https://example.com/manifest.m3u8?CMCD=oldData&ateme_date_begin=2026-07-24T13:20:00Z',
+        headers: {},
+      };
+
+      (cmcdDataToUrlParameter as jest.Mock).mockReturnValue('CMCD=newData');
+
+      const processedRequest = await cmcdIntegration.preprocessHttpRequest(HttpRequestType.MEDIA_VIDEO, request);
+
+      expect(processedRequest.url).toBe(
+        'https://example.com/manifest.m3u8?ateme_date_begin=2026-07-24T13:20:00Z&CMCD=newData'
+      );
+    });
+
+    it('should add the CMCD parameter before the fragment', async () => {
+      const request: HttpRequest = {
+        credentials: 'omit',
+        method: HttpRequestMethod.GET,
+        responseType: HttpResponseType.ARRAYBUFFER,
+        url: 'https://example.com/manifest.m3u8?ateme_date_begin=2026-07-24T13:20:00Z#t=10',
+        headers: {},
+      };
+
+      (cmcdDataToUrlParameter as jest.Mock).mockReturnValue('CMCD=mockData');
+
+      const processedRequest = await cmcdIntegration.preprocessHttpRequest(HttpRequestType.MEDIA_VIDEO, request);
+
+      expect(processedRequest.url).toBe(
+        'https://example.com/manifest.m3u8?ateme_date_begin=2026-07-24T13:20:00Z&CMCD=mockData#t=10'
+      );
+    });
+
     it('should add CMCD data as headers when useQueryArgs is false', async () => {
       cmcdIntegration = new CmcdIntegration({ ...config, useQueryArgs: false });
       cmcdIntegration.setPlayer(mockPlayer);

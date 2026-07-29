@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](http://keepachangelog.com/)
 and this project adheres to [Semantic Versioning](http://semver.org/).
 
 ## [Unreleased]
+### Fixed
+- Query parameters already present on a request URL were re-encoded when `useQueryArgs` is enabled. Only the appended `CMCD` parameter is URL encoded now.
 
 ## [0.5.0] - 2026-01-14
 ### Added
