@@ -7,7 +7,7 @@ and this project adheres to [Semantic Versioning](http://semver.org/).
 
 ## [Unreleased]
 ### Changed
-- The published npm package only contains `dist/js`, `README.md`, `CHANGELOG.md` and `LICENSE` now. Local development files are no longer part of the tarball.
+- The published npm package now only ships `dist/js` plus the top-level docs (`README.md`, `CHANGELOG.md`, `LICENSE`) and required package metadata (e.g. `package.json`). Local development files are no longer part of the tarball.
 
 ### Fixed
 - Query parameters already present on a request URL were re-encoded when `useQueryArgs` is enabled. Only the appended `CMCD` parameter is URL encoded now.
