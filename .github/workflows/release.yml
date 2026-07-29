@@ -61,12 +61,9 @@ jobs:
           git push origin main
           git push origin --tags
 
-      # `npm version` above rewrote package.json, so rebuild to make sure the published
-      # bundle is generated from the released source. `dist/js` is not in git, the
+      # `npm publish` runs the `prepack` script, which rebuilds the bundle from the
+      # released source after the version bump above. `dist/js` is not in git, the
       # `files` field in package.json is what puts it into the tarball.
-      - name: Build release artifacts
-        run: npm run build
-
       - name: Publish to npm
         run: |
           echo "//registry.npmjs.org/:_authToken=${{ secrets.NPM_AUTH_TOKEN }}" > ~/.npmrc
