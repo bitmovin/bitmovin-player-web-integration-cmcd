@@ -6,8 +6,6 @@ The format is based on [Keep a Changelog](http://keepachangelog.com/)
 and this project adheres to [Semantic Versioning](http://semver.org/).
 
 ## [Unreleased]
-
-## [0.6.0] - 2026-07-29
 ### Changed
 - The published npm package now only ships `dist/js` plus the top-level docs (`README.md`, `CHANGELOG.md`, `LICENSE`) and required package metadata (e.g. `package.json`). Local development files are no longer part of the tarball.
 
@@ -43,8 +41,7 @@ and this project adheres to [Semantic Versioning](http://semver.org/).
 ### Added
 - Initial CMCD release (Beta)
 
-[Unreleased]: https://github.com/bitmovin/bitmovin-player-web-integration-cmcd/compare/v0.6.0...HEAD
-[0.6.0]: https://github.com/bitmovin/bitmovin-player-web-integration-cmcd/compare/v0.5.0...v0.6.0
+[Unreleased]: https://github.com/bitmovin/bitmovin-player-web-integration-cmcd/compare/v0.5.0...HEAD
 [0.5.0]: https://github.com/bitmovin/bitmovin-player-web-integration-cmcd/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/bitmovin/bitmovin-player-web-integration-cmcd/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/bitmovin/bitmovin-player-web-integration-cmcd/compare/v0.2.1...v0.3.0
