@@ -236,4 +236,52 @@ describe('CmcdIntegration', () => {
       expect(cmcdDataToHeader).toHaveBeenCalled();
     });
   });
+
+  describe('preprocessHttpResponse', () => {
+    const buildResponse = (elapsedTime: number, length: number) =>
+      ({
+        request: {} as HttpRequest,
+        url: 'https://example.com/segment.ts',
+        headers: {},
+        status: 200,
+        body: new ArrayBuffer(0),
+        elapsedTime,
+        length,
+      } as unknown as Parameters<CmcdIntegration['preprocessHttpResponse']>[1]);
+
+    const getMeasuredThroughput = async (type: HttpRequestType) => {
+      const request: HttpRequest = {
+        credentials: 'omit',
+        method: HttpRequestMethod.GET,
+        responseType: HttpResponseType.ARRAYBUFFER,
+        url: 'https://example.com/segment.ts',
+        headers: {},
+      };
+      (cmcdDataToUrlParameter as jest.Mock).mockReturnValue('CMCD=mockData');
+      await cmcdIntegration.preprocessHttpRequest(type, request);
+      const data = (cmcdDataToUrlParameter as jest.Mock).mock.calls.at(-1)?.[0] as { key: string; value: unknown }[];
+      return data.find((entry) => entry.key === 'mtp')?.value;
+    };
+
+    it('measures throughput in kilobits per second (bytes are converted to bits)', async () => {
+      // 1,000,000 bytes over 1 second = 8,000,000 bit/s = 8000 kbps, not 1000.
+      await cmcdIntegration.preprocessHttpResponse(HttpRequestType.MEDIA_VIDEO, buildResponse(1, 1_000_000));
+
+      expect(await getMeasuredThroughput(HttpRequestType.MEDIA_VIDEO)).toBe(8000);
+    });
+
+    it('tracks audio and video throughput independently', async () => {
+      await cmcdIntegration.preprocessHttpResponse(HttpRequestType.MEDIA_AUDIO, buildResponse(1, 125_000));
+      await cmcdIntegration.preprocessHttpResponse(HttpRequestType.MEDIA_VIDEO, buildResponse(2, 1_000_000));
+
+      expect(await getMeasuredThroughput(HttpRequestType.MEDIA_AUDIO)).toBe(1000);
+      expect(await getMeasuredThroughput(HttpRequestType.MEDIA_VIDEO)).toBe(4000);
+    });
+
+    it('does not record throughput when the response is missing timing or length', async () => {
+      await cmcdIntegration.preprocessHttpResponse(HttpRequestType.MEDIA_VIDEO, buildResponse(0, 1_000_000));
+
+      expect(await getMeasuredThroughput(HttpRequestType.MEDIA_VIDEO)).toBeUndefined();
+    });
+  });
 });
