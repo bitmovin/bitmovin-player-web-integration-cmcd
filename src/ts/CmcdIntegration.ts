@@ -188,7 +188,9 @@ export class CmcdIntegration {
       return Promise.resolve(response);
     }
 
-    const kbps = bytes / time / 1000;
+    // `elapsedTime` is in seconds and `length` in bytes. CMCD `mtp` is expressed
+    // in kilobits per second, so convert bytes to bits (* 8) before scaling to kbps.
+    const kbps = (bytes * 8) / time / 1000;
 
     if (type === (this.player?.exports.HttpRequestType.MEDIA_AUDIO || 'media/audio')) {
       this.lastMeasuredThroughputAudio = Math.round(kbps * 100) / 100;
