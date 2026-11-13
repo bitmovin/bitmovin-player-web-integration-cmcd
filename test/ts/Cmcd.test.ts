@@ -195,6 +195,32 @@ describe('Cmcd', () => {
       expect(new CmcdMeasuredThroughput(87649).keyValuePairToString()).toEqual('mtp=87600');
     });
 
+    it('should round object duration to an integer', () => {
+      // 2.002 s segment (60 frames at 29.97 fps): 2.002 * 1000 === 2001.9999999999998
+      expect(new CmcdObjectDuration(2.002 * 1000).keyValuePairToString()).toEqual('d=2002');
+      // 4.004 s segment: 4.004 * 1000 === 4003.9999999999995
+      expect(new CmcdObjectDuration(4.004 * 1000).keyValuePairToString()).toEqual('d=4004');
+    });
+
+    it('should round top bitrate to an integer', () => {
+      // A measured peak bitrate of 4482910 bps is 4482.91 kbps
+      expect(new CmcdTopBitrate(4482910 / 1000).keyValuePairToString()).toEqual('tb=4483');
+    });
+
+    it('should round encoded bitrate to an integer', () => {
+      expect(new CmcdEncodedBitrate(3199.6).keyValuePairToString()).toEqual('br=3200');
+    });
+
+    it('should send integer keys as integers in the object header', () => {
+      const cmcdObjects = [
+        new CmcdObjectDuration(2.002 * 1000),
+        new CmcdTopBitrate(4482910 / 1000),
+        new CmcdEncodedBitrate(3200),
+      ];
+
+      expect(cmcdDataToHeader(cmcdObjects)).toEqual({ 'CMCD-Object': 'br=3200,d=2002,tb=4483' });
+    });
+
     it('should remove playback rate if value is 1', () => {
       expect(new CmcdPlaybackRate(1).keyValuePairToString()).toEqual('');
     });
