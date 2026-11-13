@@ -1,6 +1,6 @@
 import { describe, beforeEach, it, expect, jest } from '@jest/globals';
 import { HttpRequest, HttpRequestMethod, HttpRequestType, HttpResponseType, PlayerAPI } from 'bitmovin-player';
-import { CmcdIntegration, CmcdConfig } from '../../src/ts/CmcdIntegration';
+import { CmcdIntegration, CmcdConfig, toRelativeUrl } from '../../src/ts/CmcdIntegration';
 import { CmcdCustomKey, cmcdDataToHeader, cmcdDataToUrlParameter, CmcdHeaderType } from '../../src/ts/Cmcd';
 
 // Jest Mocking for helper functions
@@ -18,7 +18,6 @@ jest.mock('../../src/ts/Cmcd', () => {
     CmcdBufferLength: jest.fn(),
     CmcdContentId: jest.fn(),
     CmcdSessionId: jest.fn(),
-    CmcdEncodedBitrate: jest.fn(),
     CmcdDeadline: jest.fn(),
     CmcdTopBitrate: jest.fn(),
     cmcdDataToHeader: jest.fn(),
@@ -30,8 +29,10 @@ describe('CmcdIntegration', () => {
   let cmcdIntegration: CmcdIntegration;
   let config: CmcdConfig;
   let mockPlayer: PlayerAPI;
+  let playerEventHandlers: Record<string, () => void>;
 
   beforeEach(() => {
+    playerEventHandlers = {};
     config = {
       sessionId: 'test-session',
       contentId: 'test-content',
@@ -71,6 +72,7 @@ describe('CmcdIntegration', () => {
           Seeked: 'seeked',
           TimeShift: 'timeshift',
           TimeShifted: 'timeshifted',
+          Playing: 'playing',
         },
         BufferType: {
           ForwardDuration: 'forwardduration',
@@ -81,7 +83,9 @@ describe('CmcdIntegration', () => {
           Audio: 'audio',
         },
       },
-      on: jest.fn(),
+      on: jest.fn((event: string, handler: () => void) => {
+        playerEventHandlers[event] = handler;
+      }),
     } as unknown as PlayerAPI;
 
     cmcdIntegration.setPlayer(mockPlayer);
@@ -283,5 +287,159 @@ describe('CmcdIntegration', () => {
 
       expect(await getMeasuredThroughput(HttpRequestType.MEDIA_VIDEO)).toBeUndefined();
     });
+  });
+
+  describe('segment request data', () => {
+    const baseUrl = 'https://cdn.example.com/content';
+    const videoSegments = [
+      { url: `${baseUrl}/video/1000kbps/seg1.m4s`, duration: 4 },
+      { url: `${baseUrl}/video/1000kbps/seg2.m4s`, duration: 4 },
+      { url: `${baseUrl}/video/1000kbps/seg3.m4s` },
+    ];
+    const audioSegments = [
+      { url: `${baseUrl}/audio/128kbps/seg1.m4s`, duration: 2 },
+      { url: `${baseUrl}/audio/128kbps/seg2.m4s`, duration: 2 },
+    ];
+
+    const getCmcdData = async (type: HttpRequestType, url: string) => {
+      const request: HttpRequest = {
+        credentials: 'omit',
+        method: HttpRequestMethod.GET,
+        responseType: HttpResponseType.ARRAYBUFFER,
+        url,
+        headers: {},
+      };
+      (cmcdDataToUrlParameter as jest.Mock).mockReturnValue('CMCD=mockData');
+      await cmcdIntegration.preprocessHttpRequest(type, request);
+      const data = (cmcdDataToUrlParameter as jest.Mock).mock.calls.at(-1)?.[0] as {
+        key: string;
+        value: unknown;
+        keyValuePairToString(): string;
+      }[];
+      return Object.fromEntries(
+        data.filter((entry) => entry.key).map((entry) => [entry.key, entry.keyValuePairToString()])
+      );
+    };
+
+    beforeEach(() => {
+      (mockPlayer.getAvailableSegments as jest.Mock).mockReturnValue({
+        'video/mp4': { v1: videoSegments },
+        'audio/mp4': { a1: audioSegments },
+      });
+      cmcdIntegration.onVideoAdaptation({
+        representations: [{ id: 'v1', bandwidth: 2_000_000 }],
+        suggested: 'v1',
+      } as unknown as Parameters<CmcdIntegration['onVideoAdaptation']>[0]);
+      cmcdIntegration.onAudioAdaptation({
+        representations: [{ id: 'a1', bandwidth: 128_000 }],
+        suggested: 'a1',
+      } as unknown as Parameters<CmcdIntegration['onAudioAdaptation']>[0]);
+    });
+
+    it('sends nor as URL encoded path relative to the current request', async () => {
+      const data = await getCmcdData(HttpRequestType.MEDIA_VIDEO, videoSegments[0].url);
+
+      expect(data.nor).toEqual('nor="seg2.m4s"');
+      expect(data.d).toEqual('d=4000');
+    });
+
+    it('sends nor with parent directory segments if the next object is in another directory', async () => {
+      (mockPlayer.getAvailableSegments as jest.Mock).mockReturnValue({
+        'video/mp4': { v1: [videoSegments[0], { url: `${baseUrl}/video/300kbps/seg2.m4s` }] },
+      });
+
+      const data = await getCmcdData(HttpRequestType.MEDIA_VIDEO, videoSegments[0].url);
+
+      expect(data.nor).toEqual('nor="..%2F300kbps%2Fseg2.m4s"');
+    });
+
+    it('omits nor if the next object is on a different origin', async () => {
+      (mockPlayer.getAvailableSegments as jest.Mock).mockReturnValue({
+        'video/mp4': { v1: [videoSegments[0], { url: 'https://other-cdn.example.com/seg2.m4s' }] },
+      });
+
+      const data = await getCmcdData(HttpRequestType.MEDIA_VIDEO, videoSegments[0].url);
+
+      expect(data.nor).toBeUndefined();
+    });
+
+    it('omits d if the segment duration is unknown', async () => {
+      const data = await getCmcdData(HttpRequestType.MEDIA_VIDEO, videoSegments[2].url);
+
+      expect(data.d).toBeUndefined();
+      expect(data.nor).toBeUndefined();
+    });
+
+    it('uses audio segments for audio requests', async () => {
+      const data = await getCmcdData(HttpRequestType.MEDIA_AUDIO, audioSegments[0].url);
+
+      expect(data.nor).toEqual('nor="seg2.m4s"');
+      expect(data.d).toEqual('d=2000');
+      expect(data.br).toEqual('br=128');
+    });
+
+    it('does not send rtp during startup', async () => {
+      const data = await getCmcdData(HttpRequestType.MEDIA_VIDEO, videoSegments[0].url);
+
+      expect(data.rtp).toBeUndefined();
+    });
+
+    it('sends rtp as a multiple of the encoded bitrate once playback started', async () => {
+      playerEventHandlers.playing();
+
+      const data = await getCmcdData(HttpRequestType.MEDIA_VIDEO, videoSegments[0].url);
+
+      expect(data.br).toEqual('br=2000');
+      expect(data.rtp).toEqual('rtp=10000');
+    });
+
+    it('does not send rtp while the buffer is starving', async () => {
+      playerEventHandlers.playing();
+      (mockPlayer.isStalled as jest.Mock).mockReturnValue(true);
+
+      const data = await getCmcdData(HttpRequestType.MEDIA_VIDEO, videoSegments[0].url);
+
+      expect(data.rtp).toBeUndefined();
+    });
+
+    it('does not send rtp for non-media requests', async () => {
+      playerEventHandlers.playing();
+
+      const data = await getCmcdData(HttpRequestType.MANIFEST_HLS_MASTER, `${baseUrl}/master.m3u8`);
+
+      expect(data.rtp).toBeUndefined();
+    });
+
+    it('stops sending su once playback started', async () => {
+      const { CmcdStartup } = jest.requireMock<typeof import('../../src/ts/Cmcd')>('../../src/ts/Cmcd');
+      const startupMock = CmcdStartup as unknown as jest.Mock;
+      startupMock.mockClear();
+
+      await getCmcdData(HttpRequestType.MEDIA_VIDEO, videoSegments[0].url);
+      expect(startupMock).toHaveBeenCalledTimes(1);
+
+      playerEventHandlers.playing();
+      await getCmcdData(HttpRequestType.MEDIA_VIDEO, videoSegments[1].url);
+      expect(startupMock).toHaveBeenCalledTimes(1);
+    });
+  });
+});
+
+describe('toRelativeUrl', () => {
+  it.each([
+    ['https://a.com/v/1000kbps/seg1.m4s', 'https://a.com/v/1000kbps/seg2.m4s', 'seg2.m4s'],
+    ['https://a.com/v/1000kbps/seg1.m4s', 'https://a.com/v/300kbps/seg2.m4s', '../300kbps/seg2.m4s'],
+    ['https://a.com/v/1000kbps/seg1.m4s', 'https://a.com/x/y/seg2.m4s', '../../x/y/seg2.m4s'],
+    ['https://a.com/v/seg1.m4s', 'https://a.com/v/hd/seg2.m4s', 'hd/seg2.m4s'],
+    ['https://a.com/v/seg1.m4s?CMCD=x', 'https://a.com/v/seg2.m4s?token=abc', 'seg2.m4s?token=abc'],
+    ['https://a.com/v/seg1.m4s', 'https://a.com/v/a:b.m4s', './a:b.m4s'],
+    ['https://a.com/v/seg1.m4s', 'seg2.m4s', 'seg2.m4s'],
+  ])('%s -> %s = %s', (base, target, expected) => {
+    expect(toRelativeUrl(base, target)).toEqual(expected);
+  });
+
+  it('returns null for different origins', () => {
+    expect(toRelativeUrl('https://a.com/seg1.m4s', 'https://b.com/seg2.m4s')).toBeNull();
+    expect(toRelativeUrl('https://a.com/seg1.m4s', 'http://a.com/seg2.m4s')).toBeNull();
   });
 });
