@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](http://semver.org/).
 ## [Unreleased]
 ### Fixed
 - Measured throughput (`mtp`) was reported in kilobytes per second instead of kilobits per second, making the value 8x too low (and frequently rounding down to 0, so the key was omitted entirely). Throughput is now converted from bytes to bits before scaling to kbps.
+- Object duration (`d`), top bitrate (`tb`) and encoded bitrate (`br`) could be sent as non-integer values (e.g. `d=2001.9999999999998` for a 2.002 s segment at 29.97 fps, or `tb=4482.91`), although CTA-5004 defines them as Integers. They are now rounded to the nearest integer.
 
 ## [0.6.0] - 2026-07-29
 ### Changed

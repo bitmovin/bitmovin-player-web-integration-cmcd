@@ -199,7 +199,8 @@ export class CmcdEncodedBitrate extends CmcdBase {
   public readonly type = CmcdHeaderType.Object;
 
   constructor(value: IntegerKbps) {
-    super(value);
+    // CTA-5004 defines br as an Integer (kbps)
+    super(Math.round(value));
   }
 }
 
@@ -271,7 +272,8 @@ export class CmcdObjectDuration extends CmcdBase {
   public readonly type = CmcdHeaderType.Object;
 
   constructor(value: IntegerMilliSecs) {
-    super(value);
+    // CTA-5004 defines d as an Integer (ms); 2.002 s * 1000 is 2001.9999999999998 in JS
+    super(Math.round(value));
   }
 }
 
@@ -525,7 +527,8 @@ export class CmcdTopBitrate extends CmcdBase {
   public readonly type = CmcdHeaderType.Object;
 
   constructor(value: IntegerKbps) {
-    super(value);
+    // CTA-5004 defines tb as an Integer (kbps); 4482910 bps / 1000 is 4482.91
+    super(Math.round(value));
   }
 }
 
