@@ -226,9 +226,11 @@ describe('Cmcd', () => {
       expect(new CmcdTopBitrate(1234.567).keyValuePairToString()).toEqual('tb=1235');
     });
 
-    it('should omit buffer starvation if value is false', () => {
+    it('should omit boolean keys if value is false', () => {
       expect(new CmcdBufferStarvation(true).keyValuePairToString()).toEqual('bs');
       expect(new CmcdBufferStarvation(false).keyValuePairToString()).toEqual('');
+      expect(new CmcdStartup(true).keyValuePairToString()).toEqual('su');
+      expect(new CmcdStartup(false).keyValuePairToString()).toEqual('');
     });
 
     it('should remove CMCD version if value is 1', () => {

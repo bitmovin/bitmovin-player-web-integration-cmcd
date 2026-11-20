@@ -179,8 +179,9 @@ export abstract class CmcdBase {
       return `${this.key}=${escapeCmcdString(this.value)}`;
     }
     if (typeof this.value === 'boolean') {
-      // 2. If the value type is BOOLEAN and the value is TRUE, then the equals sign and the value MUST be omitted
-      return this.value === true ? `${this.key}` : `${this.key}=${this.value}`;
+      // 2. If the value type is BOOLEAN and the value is TRUE, then the equals sign and the value MUST be omitted.
+      // Boolean keys (`bs`, `su`) MUST NOT be sent if false.
+      return this.value === true ? `${this.key}` : ``;
     }
     return `${this.key}=${this.value}`;
   }
@@ -238,11 +239,6 @@ export class CmcdBufferStarvation extends CmcdBase {
 
   constructor(value: boolean) {
     super(value);
-  }
-
-  override keyValuePairToString() {
-    // MUST NOT be sent if the buffer was not starved
-    return this.value === true ? `${this.key}` : ``;
   }
 }
 
@@ -526,11 +522,6 @@ export class CmcdStartup extends CmcdBase {
 
   constructor(value: boolean) {
     super(value);
-  }
-
-  override keyValuePairToString() {
-    // 2. If the value type is BOOLEAN and the value is TRUE, then the equals sign and the value MUST be omitted
-    return this.value === true ? `${this.key}` : ``;
   }
 }
 
