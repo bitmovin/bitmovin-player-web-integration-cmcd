@@ -128,16 +128,16 @@ const cmcdConfig: CmcdConfig = {
 };
 ```
 
-`sessionId` and `contentId` (and `setSessionId`/`setContentId`) apply to both modes. Call `cmcdIntegration.destroy()` before you destroy the player: it sends the pending reports and removes all listeners and timers.
+`sessionId` and `contentId` (and `setSessionId`/`setContentId`) apply to both modes. `cmcdIntegration.destroy()` sends the pending reports and removes all listeners and timers. With Event Mode, this is also done on the player `Destroy` event. The instance cannot be used afterwards.
 
 Settings per target:
 
 | Setting | Default | Description |
 | --- | --- | --- |
-| `url` | required | Endpoint. The reports are sent with `fetch` (`keepalive`), `Content-Type: text/cmcd`. Redirects are followed. |
+| `url` | required | Endpoint. The reports are sent with `fetch`, `Content-Type: text/cmcd`. |
 | `events` | `ps`, `e`, `t`, `rr` | Events to report |
 | `keys` | all | Keys to send. `e`, `ts`, `v`, `sid`, `cid` and the key that the event requires (`sta` for `ps`, `ec` for `e`, `cen` for `ce`, `url` for `rr`, `h` for `h`) are always sent. |
-| `intervalMs` | `30000` | Interval of `t` reports and of sending batched reports, while a source is loaded. `0` disables both. |
+| `intervalMs` | `30000` | Interval of `t` reports and of sending batched reports, while a source is loaded. Values from 1 to 999 are raised to 1000. `0` disables both. |
 | `batchSize` | `1` | Number of reports per request |
 | `authorization` | none | Value of the `Authorization` header |
 | `customKeys` | none | Custom keys for all reports of this target |
@@ -153,28 +153,29 @@ Events:
 | `rr` | Each response (`preprocessHttpResponse`), with `url` (before redirects and without CMCD), `rc`, `ttlb`, `ttfb` (if the player measures it), `ot`, and `cmsdd`/`cmsds` (Base64 of the `CMSD-Dynamic`/`CMSD-Static` response headers, if readable). `ts` is the request start. |
 | `c` | `setContentId` with a different id |
 | `h` | Hostname of manifest or media requests changed (not for the first one) |
-| `m`, `um` | `Muted`, `Unmuted` |
+| `m`, `um` | `Muted`, `Unmuted`. Also sent when the player or the application mutes, not only for user actions. |
 | `bc` | `VideoDownloadQualityChanged`/`AudioDownloadQualityChanged` (not for the first quality of a source) |
-| `abs`, `abe`, `as`, `ae`, `sk` | `AdBreakStarted`, `AdBreakFinished`, `AdStarted`, `AdFinished`/`AdError`/`AdSkipped`, `AdSkipped`. `ae` and `abe` are only sent after `as` and `abs`. |
+| `abs`, `abe`, `as`, `ae`, `sk` | `AdBreakStarted`, `AdBreakFinished`, `AdStarted`, `AdFinished`/`AdError`/`AdSkipped`, `AdSkipped`. `ae` and `abe` are only sent after `as` and `abs`. The application sets `cid` during ads with `setContentId`; `nr` is not sent. |
 | `ce` | `cmcdIntegration.sendCustomEvent(name, customKeys?)`, with `cen` of up to 64 characters |
 
 Each report carries `e`, `ts` (event time, epoch ms), `v=2`, `sn` (per target, starting at 0, reset by a new session id) and the known state keys: `sid`, `cid`, `sta`, `sf`, `st`, `pr`, `pt`, `ltc`, `bsa`, `bsda`, `dfa`, `h`, and per media type `bl`, `tbl`, `br`, `mtp`, `pb`, `tb`, `lb`, e.g. `br=(4200;v 256;a)`. `bsd`, `ec` and `msd` are buffered per target and sent once with its next report. `bs` is sent with the first report after a rebuffering started, and while it lasts.
 
 Transport per target:
 - 2xx: success.
-- 410: no more reports to this target in this session.
-- 429, 5xx and network errors: the reports are kept and sent again after 2, 4, 8, ... seconds (max. 120 s), together with the reports created meanwhile.
-- Other status codes: the reports are dropped.
+- 410: no more reports to this target until the application sets a new session id.
+- 429, 5xx, network errors and requests without response after 10 s: the reports are kept and sent again after 2, 4, 8, ... seconds, or after the `Retry-After` time if it is longer (max. 120 s), together with the reports created meanwhile.
+- Redirects are followed, but only 307 and 308 keep the POST body: 301, 302 and 303 turn it into a GET without reports. A followed redirect logs a console warning once. A redirect that is not followed counts as failure; its reports are dropped with a warning.
+- Other status codes: the reports are dropped with a warning.
 - Offline: the reports are kept and sent when the browser is online again.
 - Up to 200 reports are queued per target; the oldest are dropped first.
-- Pending reports are sent on `SourceUnloaded`, player `Destroy`, `pagehide`, when the page is hidden, and on `destroy()`.
+- Pending reports are sent on `SourceUnloaded`, `pagehide`, when the page is hidden, on player `Destroy` and on `destroy()`. These requests use `keepalive`, so they can outlive the page. Browsers limit all pending `keepalive` bodies to 64 KiB in total, so large batches are split, and requests beyond that limit are sent without `keepalive`.
 - Without `fetch`, Event Mode is disabled with a console warning. Errors are never thrown to the player or the application.
 
 Notes:
 - Privacy: `url` can contain personal data or access tokens. By default, query and fragment are removed. Use `urlFilter` to send less (`origin`) or more (`full`).
 - Request volume: with `rr` and the default `batchSize` of 1, each media request causes one report request. Use a larger `batchSize`, or remove `rr` from `events`.
 - The endpoint must allow CORS for `POST` with the headers `Content-Type` and (if used) `Authorization`, as `text/cmcd` causes a preflight request.
-- `cmsdd`/`cmsds` need `Access-Control-Expose-Headers` for the CMSD headers on cross-origin media responses.
+- `cmsdd`/`cmsds` need `Access-Control-Expose-Headers` for the CMSD headers on cross-origin media responses, and `Retry-After` needs it on cross-origin endpoint responses.
 
 Not implemented in Event Mode:
 - `b` (backgrounded), `pc`/`pe` (player collapse/expand): no reliable source for a user action
