@@ -195,6 +195,25 @@ describe('Cmcd', () => {
       expect(new CmcdMeasuredThroughput(87649).keyValuePairToString()).toEqual('mtp=87600');
     });
 
+    it('should omit measured throughput if it rounds to 0', () => {
+      expect(new CmcdMeasuredThroughput(0).keyValuePairToString()).toEqual('');
+      expect(new CmcdMeasuredThroughput(49).keyValuePairToString()).toEqual('');
+      expect(new CmcdMeasuredThroughput(50).keyValuePairToString()).toEqual('mtp=100');
+      expect(cmcdDataToUrlParameter([new CmcdMeasuredThroughput(40)])).toEqual('CMCD=');
+    });
+
+    it('should round requested maximum throughput to nearest 100kbps and omit 0', () => {
+      expect(new CmcdRequestedMaximumThroughput(15049).keyValuePairToString()).toEqual('rtp=15000');
+      expect(new CmcdRequestedMaximumThroughput(15050).keyValuePairToString()).toEqual('rtp=15100');
+      expect(new CmcdRequestedMaximumThroughput(40).keyValuePairToString()).toEqual('');
+    });
+
+    it('should URL encode the next object request value', () => {
+      expect(new CmcdNextObjectRequest('../300kbps/segment 35.m4v?token=a&b=c').keyValuePairToString()).toEqual(
+        'nor="..%2F300kbps%2Fsegment%2035.m4v%3Ftoken%3Da%26b%3Dc"'
+      );
+    });
+
     it('should remove playback rate if value is 1', () => {
       expect(new CmcdPlaybackRate(1).keyValuePairToString()).toEqual('');
     });
@@ -314,7 +333,7 @@ describe('Cmcd', () => {
 
     it('Section 6, Example #6:', () => {
       const cmcdObjects = [
-        new CmcdNextObjectRequest('..%2F300kbps%2Fsegment35.m4v'),
+        new CmcdNextObjectRequest('../300kbps/segment35.m4v'),
         new CmcdSessionId('6e2fb550-c457-11e9-bb97-0800200c9a66'),
       ];
       expect(cmcdDataToUrlParameter(cmcdObjects)).toEqual(
@@ -342,7 +361,7 @@ describe('Cmcd', () => {
 
     it('Section 6, Example #8:', () => {
       const cmcdObjects = [
-        new CmcdNextObjectRequest('..%2F300kbps%2Ftrack.m4v'),
+        new CmcdNextObjectRequest('../300kbps/track.m4v'),
         new CmcdNextRangeRequest('12323-48763'),
         new CmcdSessionId('6e2fb550-c457-11e9-bb97-0800200c9a66'),
       ];
@@ -364,7 +383,7 @@ describe('Cmcd', () => {
         new CmcdObjectDuration(4004),
         new CmcdDeadline(18500),
         new CmcdMeasuredThroughput(48100),
-        new CmcdNextObjectRequest('..%2F300kbps%2Ftrack.m4v'),
+        new CmcdNextObjectRequest('../300kbps/track.m4v'),
         new CmcdNextRangeRequest('12323-48763'),
         new CmcdObjectType(CmcdObjectTypeToken.VideoOnly),
         new CmcdPlaybackRate(1.08),
