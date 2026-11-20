@@ -1,4 +1,4 @@
-import { describe, beforeEach, it, expect, jest } from '@jest/globals';
+import { describe, beforeEach, afterEach, it, expect, jest } from '@jest/globals';
 import { HttpRequest, HttpRequestMethod, HttpRequestType, HttpResponseType, PlayerAPI } from 'bitmovin-player';
 import { CmcdIntegration, CmcdConfig } from '../../src/ts/CmcdIntegration';
 import { CmcdCustomKey, cmcdDataToHeader, cmcdDataToUrlParameter, CmcdHeaderType } from '../../src/ts/Cmcd';
@@ -608,6 +608,63 @@ describe('CmcdIntegration', () => {
       const keysAfter = await sendSegmentRequest(HttpRequestType.MEDIA_AUDIO);
       expect(keysAfter).not.toContain('br');
       expect(keysAfter).not.toContain('mtp');
+    });
+  });
+
+  describe('content id (cid) and session id (sid)', () => {
+    const { CmcdContentId, CmcdSessionId } = jest.requireMock<typeof import('../../src/ts/Cmcd')>('../../src/ts/Cmcd');
+    const cidMock = CmcdContentId as unknown as jest.Mock;
+    const sidMock = CmcdSessionId as unknown as jest.Mock;
+    let warnSpy: jest.SpiedFunction<typeof console.warn>;
+
+    const send = async (integration: CmcdIntegration) => {
+      await integration.preprocessHttpRequest(HttpRequestType.MANIFEST_DASH, {
+        credentials: 'omit',
+        method: HttpRequestMethod.GET,
+        responseType: HttpResponseType.ARRAYBUFFER,
+        url: 'https://example.com/manifest.mpd',
+        headers: {},
+      });
+    };
+
+    const createIntegration = (cfg: Partial<CmcdConfig>) => {
+      const integration = new CmcdIntegration({ ...config, ...cfg });
+      integration.setPlayer(mockPlayer);
+      return integration;
+    };
+
+    beforeEach(() => {
+      cidMock.mockClear();
+      sidMock.mockClear();
+      warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => undefined);
+    });
+
+    afterEach(() => warnSpy.mockRestore());
+
+    it('sends ids of up to 64 characters', async () => {
+      await send(createIntegration({ contentId: 'c'.repeat(64), sessionId: 's'.repeat(64) }));
+
+      expect(cidMock).toHaveBeenCalledWith('c'.repeat(64));
+      expect(sidMock).toHaveBeenCalledWith('s'.repeat(64));
+      expect(warnSpy).not.toHaveBeenCalled();
+    });
+
+    it('omits ids longer than 64 characters instead of truncating them', async () => {
+      await send(createIntegration({ contentId: 'c'.repeat(65), sessionId: 's'.repeat(65) }));
+
+      expect(cidMock).not.toHaveBeenCalled();
+      expect(sidMock).not.toHaveBeenCalled();
+    });
+
+    it('warns only once per value', async () => {
+      const integration = createIntegration({ contentId: 'c'.repeat(65) });
+      await send(integration);
+      await send(integration);
+      expect(warnSpy).toHaveBeenCalledTimes(1);
+
+      integration.setContentId('d'.repeat(65));
+      await send(integration);
+      expect(warnSpy).toHaveBeenCalledTimes(2);
     });
   });
 });

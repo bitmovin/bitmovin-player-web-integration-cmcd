@@ -17,6 +17,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/).
 - Streaming format (`sf`) was determined by the first request of any type, so e.g. an ads manifest or DRM request made `sf=o` stick for the whole session. It is now derived from the DASH, HLS master or Smooth manifest request (a new main manifest replaces the format of the previous source) and omitted while unknown. HLS variant playlists are recognized as HLS if no format is known yet.
 - Playback rate (`pr`) was sent as the playback speed while paused or before the first play. It is now `0` if the player is not playing, as required by the specification.
 - State of a previous source (streaming format, startup, buffer starvation, encoded bitrate and measured throughput) was reused after loading another source into the same player. It is now reset on `SourceUnloaded`.
+- Encoded bitrate (`br`), object duration (`d`) and top bitrate (`tb`) were not rounded and could be sent as non-integers, e.g. `d=4003.9999999999995`. They are now rounded to integers.
+- Content id (`cid`) and session id (`sid`) longer than 64 characters were sent. They are now omitted (with a console warning, once per value) instead of violating the maximum length of CMCD v1.
+- Buffer starvation (`bs`) could be encoded as `bs=false`. It is now omitted if `false`.
 - package.json description referred to the wrong product.
 
 ## [0.6.0] - 2026-07-29

@@ -199,7 +199,7 @@ export class CmcdEncodedBitrate extends CmcdBase {
   public readonly type = CmcdHeaderType.Object;
 
   constructor(value: IntegerKbps) {
-    super(value);
+    super(Math.round(value));
   }
 }
 
@@ -239,6 +239,11 @@ export class CmcdBufferStarvation extends CmcdBase {
   constructor(value: boolean) {
     super(value);
   }
+
+  override keyValuePairToString() {
+    // MUST NOT be sent if the buffer was not starved
+    return this.value === true ? `${this.key}` : ``;
+  }
 }
 
 /**
@@ -271,7 +276,7 @@ export class CmcdObjectDuration extends CmcdBase {
   public readonly type = CmcdHeaderType.Object;
 
   constructor(value: IntegerMilliSecs) {
-    super(value);
+    super(Math.round(value));
   }
 }
 
@@ -539,7 +544,7 @@ export class CmcdTopBitrate extends CmcdBase {
   public readonly type = CmcdHeaderType.Object;
 
   constructor(value: IntegerKbps) {
-    super(value);
+    super(Math.round(value));
   }
 }
 
