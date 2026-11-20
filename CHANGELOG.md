@@ -12,7 +12,6 @@ and this project adheres to [Semantic Versioning](http://semver.org/).
 - Buffer starvation (`bs`) could be encoded as `bs=false`. It is now omitted if `false`.
 - `preprocessHttpResponse` threw if the player passed no response (e.g. after a network error), which could prevent the request from being retried. A missing response is now passed on unchanged.
 
-
 ## [0.6.1] - 2026-11-20
 ### Fixed
 - Measured throughput (`mtp`) was reported in kilobytes per second instead of kilobits per second, making the value 8x too low (and frequently rounding down to 0, so the key was omitted entirely). Throughput is now converted from bytes to bits before scaling to kbps.
