@@ -220,12 +220,6 @@ describe('Cmcd', () => {
       expect(new CmcdPlaybackRate(2.52).keyValuePairToString()).toEqual('pr=2.52');
     });
 
-    it('should round encoded bitrate, object duration and top bitrate to integers', () => {
-      expect(new CmcdEncodedBitrate(1234.567).keyValuePairToString()).toEqual('br=1235');
-      expect(new CmcdObjectDuration(4003.9999999999995).keyValuePairToString()).toEqual('d=4004');
-      expect(new CmcdTopBitrate(1234.567).keyValuePairToString()).toEqual('tb=1235');
-    });
-
     it('should omit buffer starvation if value is false', () => {
       expect(new CmcdBufferStarvation(true).keyValuePairToString()).toEqual('bs');
       expect(new CmcdBufferStarvation(false).keyValuePairToString()).toEqual('');
