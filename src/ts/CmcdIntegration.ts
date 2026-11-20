@@ -200,6 +200,11 @@ export class CmcdIntegration {
   };
 
   public preprocessHttpResponse = (type: HttpRequestType, response: HttpResponse<HttpResponseBody>) => {
+    // The player passes no response if a request failed without one (e.g. network error)
+    if (!response) {
+      return Promise.resolve(response);
+    }
+
     const time = response.elapsedTime;
     const bytes = response.length;
 

@@ -289,6 +289,17 @@ describe('CmcdIntegration', () => {
       expect(await getMeasuredThroughput(HttpRequestType.MEDIA_VIDEO)).toBe(4000);
     });
 
+    it('does not throw and passes on a missing response (e.g. network error)', async () => {
+      const missingResponse = undefined as unknown as Parameters<CmcdIntegration['preprocessHttpResponse']>[1];
+
+      await expect(cmcdIntegration.preprocessHttpResponse(HttpRequestType.MEDIA_VIDEO, missingResponse)).resolves.toBe(
+        missingResponse
+      );
+      await expect(
+        cmcdIntegration.preprocessHttpResponse(HttpRequestType.MEDIA_AUDIO, null as never)
+      ).resolves.toBeNull();
+    });
+
     it('does not record throughput when the response is missing timing or length', async () => {
       await cmcdIntegration.preprocessHttpResponse(HttpRequestType.MEDIA_VIDEO, buildResponse(0, 1_000_000));
 
