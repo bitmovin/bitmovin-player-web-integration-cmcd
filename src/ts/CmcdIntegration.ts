@@ -25,6 +25,7 @@ import {
 } from 'bitmovin-player';
 import {
   CMCD_KEYS,
+  CMCD_V2_EVENT_KEYS,
   CmcdCustomKey,
   CmcdData,
   cmcdDataToHeader,
@@ -34,14 +35,20 @@ import {
   CmcdPlayStateToken,
   CmcdStreamingFormatToken,
   CmcdStreamTypeToken,
+  CmcdTypedValue,
   CmcdVersionNumbers,
 } from './Cmcd';
 import { toRelativeUrl } from './Url';
 import { createWarnOnce } from './Log';
 import { CmcdTargetRegistry } from './CmcdTargetRegistry';
+import { attempt, CmcdEventMode } from './CmcdEventMode';
+import { CmcdEventTarget } from './CmcdEventTarget';
+import { CmcdDestinationState, CmcdStartupDelay } from './CmcdDestinationState';
 
 export { CmcdCustomKey as CustomKey } from './Cmcd';
 export { CmcdHeaderType as HeaderType } from './Cmcd';
+export type { CmcdEventType } from './Cmcd';
+export type { CmcdEventTarget, CmcdUrlFilter } from './CmcdEventTarget';
 
 export interface CmcdConfig {
   sessionId?: string;
@@ -60,6 +67,11 @@ export interface CmcdConfig {
    * CMCD version, 1 (default) or 2. Version 2 sends the v2 Request Mode keys.
    */
   version?: 1 | 2;
+  /**
+   * v2 Event Mode report destinations. Event Mode always uses v2, also if `version` is 1.
+   * `sessionId` and `contentId` are shared with Request Mode.
+   */
+  eventTargets?: CmcdEventTarget[];
 }
 
 /**
@@ -106,13 +118,15 @@ const MAX_TARGETS = 16;
 /** Timestamp of an event, or now if the event has none. */
 const eventTime = (event?: PlayerEventBase) => (event && event.timestamp) || Date.now();
 
-/** Request Mode state per report destination (origin) */
-interface CmcdTarget {
-  sequenceNumber: number;
-  /** `bsd` to send with the next request */
-  rebufferingDurations: number[];
-  /** `ec` to send with the next request */
-  errorCodes: string[];
+/** Buffer (ms), bitrate and throughput (kbps) values of a media type */
+interface CmcdMediaState {
+  bl?: number;
+  dl?: number;
+  lb?: number;
+  mtp?: number;
+  pb?: number;
+  tb?: number;
+  tbl?: number;
 }
 
 export class CmcdIntegration {
@@ -147,19 +161,17 @@ export class CmcdIntegration {
 
   // Session state for v2 keys, reset on a new session id
   /** State per origin, in order of last use */
-  private targets = new CmcdTargetRegistry<CmcdTarget>(
-    () => ({ sequenceNumber: 0, rebufferingDurations: [], errorCodes: [] }),
-    MAX_TARGETS
-  );
-  /** `msd` to send with the next request */
-  private pendingStartupDelay: number | null;
-  private startupDelaySent: boolean;
+  private targets = new CmcdTargetRegistry(() => new CmcdDestinationState(), MAX_TARGETS);
+  /** Request Mode `msd`: once per session id for all origins */
+  private startupDelay = new CmcdStartupDelay();
   private rebufferingCount: number;
   private rebufferingDuration: number;
   /** Dropped frames of the previous sources of the session */
   private droppedFramesOffset = 0;
   /** Last dropped frames count of the current source */
   private droppedFrames = 0;
+
+  private eventMode: CmcdEventMode;
 
   constructor(config: CmcdConfig) {
     this.useQueryArgs = config.useQueryArgs || false;
@@ -183,17 +195,28 @@ export class CmcdIntegration {
         );
       }
     }
+
+    this.eventMode = new CmcdEventMode(
+      config.eventTargets || [],
+      {
+        getStateData: () => this.getEventStateData(),
+        getPlayState: () => this.getPlayState(),
+      },
+      this.warnOnce
+    );
   }
 
   public setPlayer(player: PlayerAPI) {
     // Listeners of a previously set player
-    for (const listener of this.listeners) {
-      this.player?.off(listener.event, listener.callback);
-    }
-    this.listeners = [];
+    this.removePlayerListeners();
 
     const events = player.exports.PlayerEvent;
+    const hasEventMode = this.eventMode.isEnabled;
     const on = <T extends PlayerEventBase>(event: PlayerEvent, callback: (event?: T) => void) => {
+      // Events unknown to the player version
+      if (!event) {
+        return;
+      }
       this.listeners.push({ event, callback });
       player.on(event, callback);
     };
@@ -221,9 +244,7 @@ export class CmcdIntegration {
       if (this.rebufferingStartedAt !== null) {
         const duration = eventTime(event) - this.rebufferingStartedAt;
         this.rebufferingDuration += duration;
-        if (this.keys.bsd) {
-          this.targets.forEach((target) => target.rebufferingDurations.push(duration));
-        }
+        this.forEachDestination('bsd', (target) => target.addRebuffering(duration));
         this.rebufferingStartedAt = null;
       }
     });
@@ -232,8 +253,10 @@ export class CmcdIntegration {
       this.isSeekingOrTimeshiftingOrStartup = false;
       if (!this.hasStarted) {
         this.hasStarted = true;
-        if (this.playRequestedAt !== null && !this.startupDelaySent) {
-          this.pendingStartupDelay = eventTime(event) - this.playRequestedAt;
+        if (this.playRequestedAt !== null) {
+          const startupDelay = eventTime(event) - this.playRequestedAt;
+          this.startupDelay.set(startupDelay);
+          this.eventMode.targets.forEach((target) => target.state.setStartupDelay(startupDelay));
         }
       }
     });
@@ -243,7 +266,7 @@ export class CmcdIntegration {
     on(events.TimeShifted, () => setSeeking(false));
 
     // Events for v2 keys only
-    if (this.keys.sta || this.keys.msd) {
+    if (this.keys.sta || this.keys.msd || hasEventMode) {
       // Also fired for `PlaybackConfig.autoplay`, which calls `play()`
       on(events.Play, (event?: PlayerEventBase) => {
         if (!this.hasStarted && this.playRequestedAt === null) {
@@ -251,20 +274,29 @@ export class CmcdIntegration {
         }
       });
     }
-    if (this.keys.sta || this.keys.ec) {
+    if (this.keys.sta || this.keys.ec || hasEventMode) {
       // Errors are fatal. Warnings are not reported, as their codes overlap with error codes.
       on(events.Error, (event?: ErrorEvent) => {
         this.hasFatalError = true;
-        if (this.keys.ec && event) {
+        if (event) {
           const errorCode = String(event.code);
-          this.targets.forEach((target) => {
-            if (target.errorCodes.indexOf(errorCode) === -1) {
-              target.errorCodes.push(errorCode);
-            }
-          });
+          this.forEachDestination('ec', (target) => target.addErrorCode(errorCode));
         }
       });
     }
+
+    if (hasEventMode) {
+      this.eventMode.setPlayer(player, on);
+      on(events.Destroy, () => this.destroy());
+    }
+  }
+
+  /** Calls `callback` for the Request Mode origins, if they collect `key`, and for the Event Mode targets. */
+  private forEachDestination(key: 'bsd' | 'ec', callback: (target: CmcdDestinationState) => void) {
+    if (this.keys[key]) {
+      this.targets.forEach(callback);
+    }
+    this.eventMode.targets.forEach((target) => callback(target.state));
   }
 
   /** Clears all state that belongs to the previously loaded source. */
@@ -285,13 +317,10 @@ export class CmcdIntegration {
 
   /** Clears all state that belongs to the previous session id. Known origins are kept as report destinations. */
   private resetSessionState() {
-    this.targets.forEach((target) => {
-      target.sequenceNumber = 0;
-      target.rebufferingDurations = [];
-      target.errorCodes = [];
-    });
-    this.pendingStartupDelay = null;
-    this.startupDelaySent = false;
+    this.targets.forEach((target) => target.reset());
+    // Not created yet when called by the constructor
+    this.eventMode?.targets.forEach((target) => target.resetSession());
+    this.startupDelay?.reset();
     // An ongoing rebuffering is counted in the new session from now on.
     this.rebufferingCount = this.rebufferingStartedAt === null ? 0 : 1;
     this.rebufferingStartedAt = this.rebufferingStartedAt === null ? null : Date.now();
@@ -311,6 +340,7 @@ export class CmcdIntegration {
   };
 
   public preprocessHttpRequest = (type: HttpRequestType, request: HttpRequest) => {
+    const originalUrl = request.url;
     // An error must not fail the request, so it is sent without CMCD data.
     try {
       const data = this.gatherCmcdData(type, request);
@@ -329,6 +359,9 @@ export class CmcdIntegration {
       this.warnOnce(`CMCD: data is not sent: ${error}`);
     }
 
+    if (this.eventMode.isEnabled) {
+      this.eventMode.onRequest(type, request, originalUrl);
+    }
     return Promise.resolve(request);
   };
 
@@ -336,6 +369,9 @@ export class CmcdIntegration {
     // The player passes no response if a request failed without one (e.g. network error)
     if (!response) {
       return Promise.resolve(response);
+    }
+    if (this.eventMode.isEnabled) {
+      this.eventMode.onResponse(response, this.getObjectType(type));
     }
 
     const time = response.elapsedTime;
@@ -366,8 +402,82 @@ export class CmcdIntegration {
     this.sessionId = id;
   }
 
+  /** Event Mode: a changed id is reported with event `c`. */
   public setContentId(id: string): void {
+    const hasChanged = id !== this.contentId;
     this.contentId = id;
+    if (hasChanged && this.eventMode.isEnabled) {
+      this.eventMode.onContentIdChanged();
+    }
+  }
+
+  /**
+   * Event Mode: reports a custom event (`e=ce`) with the name `cen` of up to 64 characters
+   * and optional custom keys.
+   */
+  public sendCustomEvent(name: string, customKeys: CmcdCustomKey[] = []): void {
+    this.eventMode.sendCustomEvent(name, customKeys);
+  }
+
+  /**
+   * Sends the pending Event Mode reports and removes all player and page listeners and timers.
+   * Call it before the player is destroyed. The instance cannot be used afterwards.
+   */
+  public destroy(): void {
+    this.removePlayerListeners();
+    this.eventMode.destroy();
+    this.player = undefined;
+  }
+
+  private removePlayerListeners() {
+    for (const listener of this.listeners) {
+      this.player?.off(listener.event, listener.callback);
+    }
+    this.listeners = [];
+  }
+
+  /** Event Mode: the keys of the state that this class tracks */
+  private getEventStateData(): CmcdData {
+    const data: CmcdData = { bsa: this.rebufferingCount, bsda: this.rebufferingDuration };
+    if (this.isValidId('cid', this.contentId, CMCD_V2_EVENT_KEYS)) {
+      data.cid = this.contentId;
+    }
+    if (this.isValidId('sid', this.sessionId, CMCD_V2_EVENT_KEYS)) {
+      data.sid = this.sessionId;
+    }
+    if (this.manifestType) {
+      data.sf = this.manifestType;
+    }
+    const player = this.player;
+    if (!player) {
+      return data;
+    }
+    // Grouped by the player APIs they need. A throwing API omits its group.
+    attempt(() => {
+      data.sta = this.getPlayState();
+      data.pr = player.isPlaying() ? player.getPlaybackSpeed() : 0;
+      const isLive = player.isLive();
+      data.st = isLive ? CmcdStreamTypeToken.Live : CmcdStreamTypeToken.Vod;
+      if (this.hasStarted) {
+        data.pt = this.getPlayheadTime(isLive);
+        data.ltc = this.getLatency(isLive);
+      }
+    });
+    attempt(() => {
+      data.dfa = this.getDroppedFramesOfSession();
+    });
+    (['video', 'audio'] as const).forEach((mediaType) => {
+      const type = mediaType === 'audio' ? CmcdObjectTypeToken.AudioOnly : CmcdObjectTypeToken.VideoOnly;
+      const media = attempt(() => this.getMediaState(mediaType, CMCD_V2_EVENT_KEYS)) || {};
+      (['bl', 'lb', 'mtp', 'pb', 'tb', 'tbl'] as const).forEach((key) => {
+        const value = media[key];
+        // An empty buffer is a valid `bl`.
+        if (typeof value === 'number' && isFinite(value) && (value > 0 || (key === 'bl' && value === 0))) {
+          data[key] = ((data[key] as CmcdTypedValue[] | undefined) || []).concat({ value, type });
+        }
+      });
+    });
+    return data;
   }
 
   private gatherCmcdData(type: HttpRequestType, request: HttpRequest): CmcdData {
@@ -414,7 +524,7 @@ export class CmcdIntegration {
     }
 
     // The object is needed as fast as possible during startup and after a stall, so no throughput cap is requested.
-    if (!isStartup && !isBufferStarvation && data.br !== undefined) {
+    if (!isStartup && !isBufferStarvation && typeof data.br === 'number') {
       data.rtp = data.br * RTP_ENCODED_BITRATE_FACTOR;
     }
 
@@ -430,25 +540,16 @@ export class CmcdIntegration {
     const player = this.player!;
     const target = this.targets.get(request.url);
 
-    if (this.keys.sn) {
-      data.sn = target.sequenceNumber++;
-    }
-    if (this.keys.bsd && target.rebufferingDurations.length > 0) {
-      data.bsd = target.rebufferingDurations;
-      target.rebufferingDurations = [];
-    }
-    if (this.keys.ec && target.errorCodes.length > 0) {
-      data.ec = target.errorCodes;
-      target.errorCodes = [];
-    }
+    target.addTo(data, this.keys);
     if (this.keys.sta) {
       data.sta = this.getPlayState();
     }
     // Once per session id, with the first request after startup
-    if (this.keys.msd && this.pendingStartupDelay !== null) {
-      data.msd = this.pendingStartupDelay;
-      this.pendingStartupDelay = null;
-      this.startupDelaySent = true;
+    if (this.keys.msd) {
+      const startupDelay = this.startupDelay.take();
+      if (startupDelay !== null) {
+        data.msd = startupDelay;
+      }
     }
     if (this.keys.bsa) {
       data.bsa = this.rebufferingCount;
@@ -462,18 +563,41 @@ export class CmcdIntegration {
     }
     const isLive = player.isLive();
     if (this.keys.pt) {
-      // Live: absolute time, which is the wallclock time if the player knows it. VOD: offset from the start of the asset.
-      const time = isLive ? player.getCurrentTime() : player.getCurrentTime('relativetime' as TimeMode);
-      if (Number.isFinite(time)) {
-        data.pt = time * 1000;
-      }
+      data.pt = this.getPlayheadTime(isLive);
     }
-    if (this.keys.ltc && isLive && player.lowlatency) {
-      const latency = player.lowlatency.getLatency();
-      if (Number.isFinite(latency) && latency > 0) {
-        data.ltc = latency * 1000;
-      }
+    if (this.keys.ltc) {
+      data.ltc = this.getLatency(isLive);
     }
+  }
+
+  /**
+   * Playhead time in ms. Live: absolute time, which is the wallclock time if the player knows it.
+   * VOD: offset from the start of the asset.
+   */
+  private getPlayheadTime(isLive: boolean): number | undefined {
+    const player = this.player!;
+    const time = isLive ? player.getCurrentTime() : player.getCurrentTime('relativetime' as TimeMode);
+    return Number.isFinite(time) ? time * 1000 : undefined;
+  }
+
+  /** Live latency in ms */
+  private getLatency(isLive: boolean): number | undefined {
+    const player = this.player!;
+    if (!isLive || !player.lowlatency) {
+      return undefined;
+    }
+    const latency = player.lowlatency.getLatency();
+    return Number.isFinite(latency) && latency > 0 ? latency * 1000 : undefined;
+  }
+
+  /** Dropped frames since session start. The player counts per source. */
+  private getDroppedFramesOfSession(): number | undefined {
+    const droppedFrames = this.player!.getDroppedVideoFrames();
+    if (!Number.isFinite(droppedFrames)) {
+      return undefined;
+    }
+    this.droppedFrames = droppedFrames;
+    return this.droppedFramesOffset + droppedFrames;
   }
 
   /** Play state as perceived by the user at request time */
@@ -502,11 +626,11 @@ export class CmcdIntegration {
   }
 
   /** Ids longer than the maximum length of the key are omitted, as truncating could cause collisions. */
-  private isValidId(key: 'cid' | 'sid', value: string): boolean {
+  private isValidId(key: 'cid' | 'sid', value: string, keys: CmcdKeyTable = this.keys): boolean {
     if (!value) {
       return false;
     }
-    const maxLength = this.keys[key].maxLength;
+    const maxLength = keys[key].maxLength;
     if (value.length <= maxLength) {
       return true;
     }
@@ -572,55 +696,16 @@ export class CmcdIntegration {
 
     const isAudio = mediaType === 'audio';
     const currentQuality = isAudio ? this.currentAudioQuality : this.currentVideoQuality;
-    const lastMeasuredThroughput = isAudio ? this.lastMeasuredThroughputAudio : this.lastMeasuredThroughputVideo;
 
     if (currentQuality && currentQuality.bandwidth) {
       data.br = Math.round(currentQuality.bandwidth / 1000);
     }
-
-    if (lastMeasuredThroughput) {
-      data.mtp = lastMeasuredThroughput;
-    }
-
-    const buffer = this.player.buffer.getLevel(
-      this.player.exports.BufferType.ForwardDuration,
-      isAudio ? this.player.exports.MediaType.Audio : this.player.exports.MediaType.Video
-    );
-    if (buffer.targetLevel > 0) {
-      data.bl = buffer.level * 1000;
-      data.dl = (buffer.level / this.player.getPlaybackSpeed()) * 1000;
-      if (this.keys.tbl) {
-        data.tbl = buffer.targetLevel * 1000;
-      }
-    }
-
-    const qualities = isAudio ? this.player.getAvailableAudioQualities() : this.player.getAvailableVideoQualities();
-    const topBitrate = qualities.reduce((prev, current) => Math.max(prev, current.bitrate), 0) / 1000;
-    if (topBitrate > 0) {
-      data.tb = topBitrate;
-    }
-    if (this.keys.lb) {
-      const lowestBitrate = qualities.reduce(
-        (prev, current) => (current.bitrate > 0 ? Math.min(prev, current.bitrate) : prev),
-        Infinity
-      );
-      if (lowestBitrate !== Infinity) {
-        data.lb = lowestBitrate / 1000;
-      }
-    }
-    if (this.keys.pb) {
-      const playbackData = isAudio ? this.player.getPlaybackAudioData() : this.player.getPlaybackVideoData();
-      if (playbackData && playbackData.bitrate > 0) {
-        data.pb = playbackData.bitrate / 1000;
-      }
+    const media = this.getMediaState(mediaType, this.keys);
+    for (const key of Object.keys(media) as (keyof CmcdMediaState)[]) {
+      data[key] = media[key];
     }
     if (this.keys.dfa && !isAudio) {
-      // The player counts per source, `dfa` since session start.
-      const droppedFrames = this.player.getDroppedVideoFrames();
-      if (Number.isFinite(droppedFrames)) {
-        this.droppedFrames = droppedFrames;
-        data.dfa = this.droppedFramesOffset + droppedFrames;
-      }
+      data.dfa = this.getDroppedFramesOfSession();
     }
 
     if (currentQuality) {
@@ -636,6 +721,51 @@ export class CmcdIntegration {
         console.error(`Error processing ${mediaType} segments:`, error);
       }
     }
+  }
+
+  /** Values of a media type for the keys in `keys`, also used by Event Mode. Throws if a player API throws. */
+  private getMediaState(mediaType: 'audio' | 'video', keys: CmcdKeyTable): CmcdMediaState {
+    const player = this.player!;
+    const isAudio = mediaType === 'audio';
+    const state: CmcdMediaState = {};
+    const throughput = isAudio ? this.lastMeasuredThroughputAudio : this.lastMeasuredThroughputVideo;
+    if (throughput) {
+      state.mtp = throughput;
+    }
+
+    const buffer = player.buffer.getLevel(
+      player.exports.BufferType.ForwardDuration,
+      isAudio ? player.exports.MediaType.Audio : player.exports.MediaType.Video
+    );
+    if (buffer.targetLevel > 0) {
+      state.bl = buffer.level * 1000;
+      state.dl = (buffer.level / player.getPlaybackSpeed()) * 1000;
+      if (keys.tbl) {
+        state.tbl = buffer.targetLevel * 1000;
+      }
+    }
+
+    const qualities = isAudio ? player.getAvailableAudioQualities() : player.getAvailableVideoQualities();
+    const topBitrate = qualities.reduce((prev, current) => Math.max(prev, current.bitrate), 0) / 1000;
+    if (topBitrate > 0) {
+      state.tb = topBitrate;
+    }
+    if (keys.lb) {
+      const lowestBitrate = qualities.reduce(
+        (prev, current) => (current.bitrate > 0 ? Math.min(prev, current.bitrate) : prev),
+        Infinity
+      );
+      if (lowestBitrate !== Infinity) {
+        state.lb = lowestBitrate / 1000;
+      }
+    }
+    if (keys.pb) {
+      const playbackData = isAudio ? player.getPlaybackAudioData() : player.getPlaybackVideoData();
+      if (playbackData && playbackData.bitrate > 0) {
+        state.pb = playbackData.bitrate / 1000;
+      }
+    }
+    return state;
   }
 
   private addNextObjectAndObjectDuration(data: CmcdData, segments: SegmentInfo[], requestUrl: string) {
