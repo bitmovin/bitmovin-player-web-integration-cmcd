@@ -270,7 +270,6 @@ describe('CMCD v2 Event Mode encoding', () => {
   describe('key table', () => {
     it('allows the Event-only keys only in Event Mode', () => {
       for (const key of Object.keys(CMCD_V2_EVENT_ONLY_KEYS) as (keyof CmcdData)[]) {
-        expect(CMCD_V2_EVENT_ONLY_KEYS[key]!.modes).toEqual(['event']);
         expect(CMCD_V2_EVENT_ONLY_KEYS[key]!.header).toBeUndefined();
         expect(CMCD_V2_KEYS[key]).toBeUndefined();
       }

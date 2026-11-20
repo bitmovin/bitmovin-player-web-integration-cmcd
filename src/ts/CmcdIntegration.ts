@@ -41,15 +41,14 @@ import {
 import { toRelativeUrl } from './Url';
 import { createWarnOnce } from './Log';
 import { CmcdTargetRegistry } from './CmcdTargetRegistry';
-import { attempt, CmcdEnvironment, CmcdEventMode } from './CmcdEventMode';
+import { attempt, CmcdEventMode } from './CmcdEventMode';
 import { CmcdEventTarget } from './CmcdEventTarget';
+import { CmcdDestinationState } from './CmcdDestinationState';
 
 export { CmcdCustomKey as CustomKey } from './Cmcd';
 export { CmcdHeaderType as HeaderType } from './Cmcd';
 export type { CmcdEventType } from './Cmcd';
 export type { CmcdEventTarget, CmcdUrlFilter } from './CmcdEventTarget';
-export type { CmcdEnvironment } from './CmcdEventMode';
-export type { CmcdTransport, CmcdTransportRequest } from './CmcdEventReporter';
 
 export interface CmcdConfig {
   sessionId?: string;
@@ -119,13 +118,15 @@ const MAX_TARGETS = 16;
 /** Timestamp of an event, or now if the event has none. */
 const eventTime = (event?: PlayerEventBase) => (event && event.timestamp) || Date.now();
 
-/** Request Mode state per report destination (origin) */
-interface CmcdTarget {
-  sequenceNumber: number;
-  /** `bsd` to send with the next request */
-  rebufferingDurations: number[];
-  /** `ec` to send with the next request */
-  errorCodes: string[];
+/** Buffer (ms), bitrate and throughput (kbps) values of a media type */
+interface CmcdMediaState {
+  bl?: number;
+  dl?: number;
+  lb?: number;
+  mtp?: number;
+  pb?: number;
+  tb?: number;
+  tbl?: number;
 }
 
 export class CmcdIntegration {
@@ -160,10 +161,7 @@ export class CmcdIntegration {
 
   // Session state for v2 keys, reset on a new session id
   /** State per origin, in order of last use */
-  private targets = new CmcdTargetRegistry<CmcdTarget>(
-    () => ({ sequenceNumber: 0, rebufferingDurations: [], errorCodes: [] }),
-    MAX_TARGETS
-  );
+  private targets = new CmcdTargetRegistry(() => new CmcdDestinationState(), MAX_TARGETS);
   /** `msd` to send with the next request */
   private pendingStartupDelay: number | null;
   private startupDelaySent: boolean;
@@ -176,8 +174,7 @@ export class CmcdIntegration {
 
   private eventMode: CmcdEventMode;
 
-  /** `environment` is for tests. */
-  constructor(config: CmcdConfig, environment: CmcdEnvironment = {}) {
+  constructor(config: CmcdConfig) {
     this.useQueryArgs = config.useQueryArgs || false;
     this.sessionId = config.sessionId || '';
     this.contentId = config.contentId || '';
@@ -205,10 +202,7 @@ export class CmcdIntegration {
       {
         getStateData: () => this.getEventStateData(),
         getPlayState: () => this.getPlayState(),
-        isRebuffering: () => this.rebufferingStartedAt !== null,
-        getObjectType: (type) => this.getObjectType(type),
       },
-      environment,
       this.warnOnce
     );
   }
@@ -251,10 +245,7 @@ export class CmcdIntegration {
       if (this.rebufferingStartedAt !== null) {
         const duration = eventTime(event) - this.rebufferingStartedAt;
         this.rebufferingDuration += duration;
-        if (this.keys.bsd) {
-          this.targets.forEach((target) => target.rebufferingDurations.push(duration));
-        }
-        this.eventMode.onRebufferingEnded(duration);
+        this.forEachDestination('bsd', (target) => target.addRebuffering(duration));
         this.rebufferingStartedAt = null;
       }
     });
@@ -268,7 +259,7 @@ export class CmcdIntegration {
           if (!this.startupDelaySent) {
             this.pendingStartupDelay = startupDelay;
           }
-          this.eventMode.onStartupDelay(startupDelay);
+          this.eventMode.targets.forEach((target) => target.state.setStartupDelay(startupDelay));
         }
       }
     });
@@ -292,22 +283,23 @@ export class CmcdIntegration {
         this.hasFatalError = true;
         if (event) {
           const errorCode = String(event.code);
-          const addErrorCode = (target: CmcdTarget) => {
-            if (target.errorCodes.indexOf(errorCode) === -1) {
-              target.errorCodes.push(errorCode);
-            }
-          };
-          if (this.keys.ec) {
-            this.targets.forEach(addErrorCode);
-          }
-          this.eventMode.onError(errorCode);
+          this.forEachDestination('ec', (target) => target.addErrorCode(errorCode));
         }
       });
     }
 
     if (hasEventMode) {
       this.eventMode.setPlayer(player, on);
+      on(events.Destroy, () => this.destroy());
     }
+  }
+
+  /** Calls `callback` for the Request Mode origins, if they collect `key`, and for the Event Mode targets. */
+  private forEachDestination(key: 'bsd' | 'ec', callback: (target: CmcdDestinationState) => void) {
+    if (this.keys[key]) {
+      this.targets.forEach(callback);
+    }
+    this.eventMode.targets.forEach((target) => callback(target.state));
   }
 
   /** Clears all state that belongs to the previously loaded source. */
@@ -328,13 +320,9 @@ export class CmcdIntegration {
 
   /** Clears all state that belongs to the previous session id. Known origins are kept as report destinations. */
   private resetSessionState() {
-    this.targets.forEach((target) => {
-      target.sequenceNumber = 0;
-      target.rebufferingDurations = [];
-      target.errorCodes = [];
-    });
+    this.targets.forEach((target) => target.reset());
     // Not created yet when called by the constructor
-    this.eventMode?.resetSession();
+    this.eventMode?.targets.forEach((target) => target.resetSession());
     this.pendingStartupDelay = null;
     this.startupDelaySent = false;
     // An ongoing rebuffering is counted in the new session from now on.
@@ -376,14 +364,14 @@ export class CmcdIntegration {
     }
 
     if (this.eventMode.isEnabled) {
-      this.eventMode.onRequest(type, originalUrl, request.url);
+      this.eventMode.onRequest(type, request, originalUrl);
     }
     return Promise.resolve(request);
   };
 
   public preprocessHttpResponse = (type: HttpRequestType, response: HttpResponse<HttpResponseBody>) => {
     if (this.eventMode.isEnabled) {
-      this.eventMode.onResponse(type, response);
+      this.eventMode.onResponse(response, this.getObjectType(type));
     }
     const time = response.elapsedTime;
     const bytes = response.length;
@@ -442,7 +430,7 @@ export class CmcdIntegration {
 
   private removePlayerListeners() {
     for (const listener of this.listeners) {
-      attempt(() => this.player?.off(listener.event, listener.callback));
+      this.player?.off(listener.event, listener.callback);
     }
     this.listeners = [];
   }
@@ -459,36 +447,35 @@ export class CmcdIntegration {
     if (this.manifestType) {
       data.sf = this.manifestType;
     }
-    const mtp: CmcdTypedValue[] = [];
-    if (this.lastMeasuredThroughputVideo > 0) {
-      mtp.push({ value: this.lastMeasuredThroughputVideo, type: CmcdObjectTypeToken.VideoOnly });
-    }
-    if (this.lastMeasuredThroughputAudio > 0) {
-      mtp.push({ value: this.lastMeasuredThroughputAudio, type: CmcdObjectTypeToken.AudioOnly });
-    }
-    if (mtp.length > 0) {
-      data.mtp = mtp;
-    }
-
     const player = this.player;
     if (!player) {
       return data;
     }
+    // Grouped by the player APIs they need. A throwing API omits its group.
     attempt(() => {
       data.sta = this.getPlayState();
+      data.pr = player.isPlaying() ? player.getPlaybackSpeed() : 0;
+      const isLive = player.isLive();
+      data.st = isLive ? CmcdStreamTypeToken.Live : CmcdStreamTypeToken.Vod;
+      if (this.hasStarted) {
+        data.pt = this.getPlayheadTime(isLive);
+        data.ltc = this.getLatency(isLive);
+      }
     });
     attempt(() => {
       data.dfa = this.getDroppedFramesOfSession();
     });
-    if (this.hasStarted) {
-      const isLive = !!attempt(() => player.isLive());
-      attempt(() => {
-        data.pt = this.getPlayheadTime(isLive);
+    (['video', 'audio'] as const).forEach((mediaType) => {
+      const type = mediaType === 'audio' ? CmcdObjectTypeToken.AudioOnly : CmcdObjectTypeToken.VideoOnly;
+      const media = attempt(() => this.getMediaState(mediaType, CMCD_V2_EVENT_KEYS)) || {};
+      (['bl', 'lb', 'mtp', 'pb', 'tb', 'tbl'] as const).forEach((key) => {
+        const value = media[key];
+        // An empty buffer is a valid `bl`.
+        if (typeof value === 'number' && isFinite(value) && (value > 0 || (key === 'bl' && value === 0))) {
+          data[key] = ((data[key] as CmcdTypedValue[] | undefined) || []).concat({ value, type });
+        }
       });
-      attempt(() => {
-        data.ltc = this.getLatency(isLive);
-      });
-    }
+    });
     return data;
   }
 
@@ -552,17 +539,7 @@ export class CmcdIntegration {
     const player = this.player!;
     const target = this.targets.get(request.url);
 
-    if (this.keys.sn) {
-      data.sn = target.sequenceNumber++;
-    }
-    if (this.keys.bsd && target.rebufferingDurations.length > 0) {
-      data.bsd = target.rebufferingDurations;
-      target.rebufferingDurations = [];
-    }
-    if (this.keys.ec && target.errorCodes.length > 0) {
-      data.ec = target.errorCodes;
-      target.errorCodes = [];
-    }
+    target.addTo(data, this.keys);
     if (this.keys.sta) {
       data.sta = this.getPlayState();
     }
@@ -717,47 +694,13 @@ export class CmcdIntegration {
 
     const isAudio = mediaType === 'audio';
     const currentQuality = isAudio ? this.currentAudioQuality : this.currentVideoQuality;
-    const lastMeasuredThroughput = isAudio ? this.lastMeasuredThroughputAudio : this.lastMeasuredThroughputVideo;
 
     if (currentQuality && currentQuality.bandwidth) {
       data.br = Math.round(currentQuality.bandwidth / 1000);
     }
-
-    if (lastMeasuredThroughput) {
-      data.mtp = lastMeasuredThroughput;
-    }
-
-    const buffer = this.player.buffer.getLevel(
-      this.player.exports.BufferType.ForwardDuration,
-      isAudio ? this.player.exports.MediaType.Audio : this.player.exports.MediaType.Video
-    );
-    if (buffer.targetLevel > 0) {
-      data.bl = buffer.level * 1000;
-      data.dl = (buffer.level / this.player.getPlaybackSpeed()) * 1000;
-      if (this.keys.tbl) {
-        data.tbl = buffer.targetLevel * 1000;
-      }
-    }
-
-    const qualities = isAudio ? this.player.getAvailableAudioQualities() : this.player.getAvailableVideoQualities();
-    const topBitrate = qualities.reduce((prev, current) => Math.max(prev, current.bitrate), 0) / 1000;
-    if (topBitrate > 0) {
-      data.tb = topBitrate;
-    }
-    if (this.keys.lb) {
-      const lowestBitrate = qualities.reduce(
-        (prev, current) => (current.bitrate > 0 ? Math.min(prev, current.bitrate) : prev),
-        Infinity
-      );
-      if (lowestBitrate !== Infinity) {
-        data.lb = lowestBitrate / 1000;
-      }
-    }
-    if (this.keys.pb) {
-      const playbackData = isAudio ? this.player.getPlaybackAudioData() : this.player.getPlaybackVideoData();
-      if (playbackData && playbackData.bitrate > 0) {
-        data.pb = playbackData.bitrate / 1000;
-      }
+    const media = this.getMediaState(mediaType, this.keys);
+    for (const key of Object.keys(media) as (keyof CmcdMediaState)[]) {
+      data[key] = media[key];
     }
     if (this.keys.dfa && !isAudio) {
       data.dfa = this.getDroppedFramesOfSession();
@@ -776,6 +719,51 @@ export class CmcdIntegration {
         console.error(`Error processing ${mediaType} segments:`, error);
       }
     }
+  }
+
+  /** Values of a media type for the keys in `keys`, also used by Event Mode. Throws if a player API throws. */
+  private getMediaState(mediaType: 'audio' | 'video', keys: CmcdKeyTable): CmcdMediaState {
+    const player = this.player!;
+    const isAudio = mediaType === 'audio';
+    const state: CmcdMediaState = {};
+    const throughput = isAudio ? this.lastMeasuredThroughputAudio : this.lastMeasuredThroughputVideo;
+    if (throughput) {
+      state.mtp = throughput;
+    }
+
+    const buffer = player.buffer.getLevel(
+      player.exports.BufferType.ForwardDuration,
+      isAudio ? player.exports.MediaType.Audio : player.exports.MediaType.Video
+    );
+    if (buffer.targetLevel > 0) {
+      state.bl = buffer.level * 1000;
+      state.dl = (buffer.level / player.getPlaybackSpeed()) * 1000;
+      if (keys.tbl) {
+        state.tbl = buffer.targetLevel * 1000;
+      }
+    }
+
+    const qualities = isAudio ? player.getAvailableAudioQualities() : player.getAvailableVideoQualities();
+    const topBitrate = qualities.reduce((prev, current) => Math.max(prev, current.bitrate), 0) / 1000;
+    if (topBitrate > 0) {
+      state.tb = topBitrate;
+    }
+    if (keys.lb) {
+      const lowestBitrate = qualities.reduce(
+        (prev, current) => (current.bitrate > 0 ? Math.min(prev, current.bitrate) : prev),
+        Infinity
+      );
+      if (lowestBitrate !== Infinity) {
+        state.lb = lowestBitrate / 1000;
+      }
+    }
+    if (keys.pb) {
+      const playbackData = isAudio ? player.getPlaybackAudioData() : player.getPlaybackVideoData();
+      if (playbackData && playbackData.bitrate > 0) {
+        state.pb = playbackData.bitrate / 1000;
+      }
+    }
+    return state;
   }
 
   private addNextObjectAndObjectDuration(data: CmcdData, segments: SegmentInfo[], requestUrl: string) {

@@ -1,12 +1,27 @@
 import { describe, beforeEach, afterEach, it, expect, jest } from '@jest/globals';
 import { HttpRequestMethod, HttpRequestType, HttpResponseType, PlayerAPI } from 'bitmovin-player';
 import { CmcdConfig, CmcdEventTarget, CmcdIntegration, CmcdUrlFilter, CustomKey } from '../../src/ts/CmcdIntegration';
-import { CmcdTransport, CmcdTransportRequest } from '../../src/ts/CmcdEventReporter';
 
 const START = 1764752400000;
 const COLLECTOR = 'https://collector.example.com/cmcd';
 const OTHER_COLLECTOR = 'https://other.example.com/cmcd';
 const SEGMENT = 'https://cdn.example.com/video/seg1.m4s?token=secret#frag';
+
+interface FetchInit {
+  method: string;
+  headers: Record<string, string>;
+  body: string;
+  keepalive: boolean;
+  signal?: AbortSignal;
+}
+
+interface FetchResponse {
+  status: number;
+  redirected?: boolean;
+  headers?: { get(name: string): string | null };
+}
+
+type FetchMock = jest.Mock<(url: string, init: FetchInit) => Promise<FetchResponse>>;
 
 const PLAYER_EVENTS: Record<string, string> = {
   SourceLoaded: 'sourceloaded',
@@ -54,7 +69,7 @@ describe('CmcdIntegration Event Mode', () => {
     source: object | null;
   };
   let mockPlayer: PlayerAPI;
-  let transport: jest.Mock<CmcdTransport>;
+  let fetchMock: FetchMock;
   let statuses: number[];
   let warnSpy: jest.SpiedFunction<typeof console.warn>;
   let integration: CmcdIntegration;
@@ -63,18 +78,19 @@ describe('CmcdIntegration Event Mode', () => {
     (handlers[event] || []).slice().forEach((handler) => handler({ type: event, timestamp: Date.now(), ...data }));
 
   const create = (targets: CmcdEventTarget[], config: CmcdConfig = {}, withPlayer = true) => {
-    const created = new CmcdIntegration(
-      { sessionId: 'session-id-123', contentId: 'content-id-123', eventTargets: targets, ...config },
-      { transport, now: () => Date.now() }
-    );
+    const created = new CmcdIntegration({
+      sessionId: 'session-id-123',
+      contentId: 'content-id-123',
+      eventTargets: targets,
+      ...config,
+    });
     if (withPlayer) {
       created.setPlayer(mockPlayer);
     }
     return created;
   };
 
-  const requestsTo = (url: string) =>
-    transport.mock.calls.filter((call) => call[0] === url).map((call) => call[1] as CmcdTransportRequest);
+  const requestsTo = (url: string) => fetchMock.mock.calls.filter((call) => call[0] === url).map((call) => call[1]);
 
   /** All records sent to `url`, in order */
   const recordsTo = async (url = COLLECTOR) => {
@@ -135,7 +151,8 @@ describe('CmcdIntegration Event Mode', () => {
     statuses = [];
     state = { live: false, playing: false, paused: false, stalled: false, ended: false, time: 12.3456, source: null };
     warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => undefined);
-    transport = jest.fn<CmcdTransport>(() => Promise.resolve({ status: statuses.shift() || 204 }));
+    fetchMock = jest.fn(() => Promise.resolve({ status: statuses.shift() || 204 })) as unknown as FetchMock;
+    (globalThis as { fetch?: unknown }).fetch = fetchMock;
     mockPlayer = {
       isLive: () => state.live,
       isPlaying: () => state.playing,
@@ -178,13 +195,14 @@ describe('CmcdIntegration Event Mode', () => {
 
   afterEach(() => {
     integration?.destroy();
+    delete (globalThis as { fetch?: unknown }).fetch;
     warnSpy.mockRestore();
     jest.useRealTimers();
   });
 
   describe('setup', () => {
     it('is disabled with one warning if fetch is not available', () => {
-      expect(typeof (globalThis as { fetch?: unknown }).fetch).not.toBe('function');
+      delete (globalThis as { fetch?: unknown }).fetch;
       integration = new CmcdIntegration({ eventTargets: [{ url: COLLECTOR }, { url: OTHER_COLLECTOR }] });
       integration.setPlayer(mockPlayer);
       expect(() => {
@@ -193,25 +211,13 @@ describe('CmcdIntegration Event Mode', () => {
         integration.setContentId('other');
       }).not.toThrow();
       expect(warnSpy).toHaveBeenCalledTimes(1);
-      expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('fetch is not available'));
-    });
-
-    it('uses fetch by default', async () => {
-      const fetchMock = jest.fn(() => Promise.resolve({ status: 204 }));
-      (globalThis as { fetch?: unknown }).fetch = fetchMock;
-      try {
-        integration = new CmcdIntegration({ eventTargets: [{ url: COLLECTOR, events: ['ce'] }] });
-        integration.sendCustomEvent('x');
-        expect(fetchMock).toHaveBeenCalledWith(COLLECTOR, expect.objectContaining({ method: 'POST' }));
-      } finally {
-        delete (globalThis as { fetch?: unknown }).fetch;
-      }
+      expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('fetch not available'));
     });
 
     it('ignores targets without url', async () => {
       integration = create([{ url: '' } as CmcdEventTarget, { url: COLLECTOR, events: ['ce'] }]);
       integration.sendCustomEvent('x');
-      expect(transport).toHaveBeenCalledTimes(1);
+      expect(fetchMock).toHaveBeenCalledTimes(1);
       expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('without url'));
     });
 
@@ -473,7 +479,7 @@ describe('CmcdIntegration Event Mode', () => {
       expect(await recordsTo()).toEqual([
         `cen="com.example-login",cid="content-id-123",com.example-user="u1",e=ce,sid="session-id-123",ts=${START},v=2`,
       ]);
-      expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('exceeds 64 characters'));
+      expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('64 printable ASCII characters'));
     });
   });
 
@@ -561,7 +567,7 @@ describe('CmcdIntegration Event Mode', () => {
       ]);
       const other = await parsedTo(OTHER_COLLECTOR);
       expect(other.map((record) => [record.msd, record.bs, record.bsd, record.ec])).toEqual([
-        ['100', undefined, '(1500)', '("9")'],
+        ['100', '?1', '(1500)', '("9")'],
       ]);
     });
 
@@ -594,7 +600,7 @@ describe('CmcdIntegration Event Mode', () => {
       integration.sendCustomEvent('a');
       integration.sendCustomEvent('b');
       await settle();
-      expect(transport).not.toHaveBeenCalled();
+      expect(fetchMock).not.toHaveBeenCalled();
       integration.sendCustomEvent('c');
       integration.sendCustomEvent('d');
       await settle();
@@ -630,7 +636,7 @@ describe('CmcdIntegration Event Mode', () => {
         integration = create([{ url: COLLECTOR, events: ['ce'], keys: [] }]);
         integration.sendCustomEvent('a');
         await settle();
-        expect(transport).not.toHaveBeenCalled();
+        expect(fetchMock).not.toHaveBeenCalled();
         Object.defineProperty(navigator, 'onLine', { value: true, configurable: true });
         window.dispatchEvent(new Event('online'));
         expect(await recordsTo()).toHaveLength(1);
@@ -666,6 +672,191 @@ describe('CmcdIntegration Event Mode', () => {
     });
   });
 
+  describe('review fixes', () => {
+    const response = (status: number, headers: Record<string, string> = {}, redirected = false) => ({
+      status,
+      redirected,
+      headers: { get: (name: string) => headers[name] ?? null },
+    });
+
+    it('1: sends bs with the next report after a rebuffering, also without ps reports', async () => {
+      integration = create([{ url: COLLECTOR, events: ['t'], keys: ['bs', 'bsd'] }]);
+      emit('sourceloaded');
+      startPlayback();
+      jest.advanceTimersByTime(5000);
+      state.stalled = true;
+      emit('stallstarted');
+      jest.advanceTimersByTime(2000);
+      state.stalled = false;
+      emit('stallended');
+      jest.advanceTimersByTime(23000);
+      jest.advanceTimersByTime(30000);
+      expect((await parsedTo()).map((record) => [record.bs, record.bsd])).toEqual([
+        ['?1', '(2000)'],
+        [undefined, undefined],
+      ]);
+    });
+
+    it('2: warns once if the target redirected, as 301 to 303 drop the body', async () => {
+      fetchMock.mockImplementation(() => Promise.resolve(response(204, {}, true)));
+      integration = create([{ url: COLLECTOR, events: ['ce'], keys: [] }]);
+      integration.sendCustomEvent('a');
+      await settle();
+      integration.sendCustomEvent('b');
+      await settle();
+      expect(warnSpy.mock.calls.filter((call) => String(call[0]).indexOf('redirected') !== -1)).toHaveLength(1);
+    });
+
+    it('2: drops the reports with a warning on a redirect that was not followed', async () => {
+      fetchMock.mockImplementation(() => Promise.resolve(response(0)));
+      integration = create([{ url: COLLECTOR, events: ['ce'], keys: [] }]);
+      integration.sendCustomEvent('a');
+      await settle();
+      jest.advanceTimersByTime(300000);
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+      expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('responded 0'));
+    });
+
+    it('3: uses keepalive only when the page or the source ends', async () => {
+      integration = create([{ url: COLLECTOR, events: ['ce'], keys: [], batchSize: 2 }]);
+      integration.sendCustomEvent('a');
+      integration.sendCustomEvent('b');
+      integration.sendCustomEvent('c');
+      window.dispatchEvent(new Event('pagehide'));
+      await settle();
+      expect(requestsTo(COLLECTOR).map((request) => request.keepalive)).toEqual([false, true]);
+    });
+
+    it('3: splits forced batches into chunks within the keepalive budget, shared by all targets', async () => {
+      // Pending until the request timeout aborts it
+      fetchMock.mockImplementation(
+        (_url, init) =>
+          new Promise((_resolve, reject) => init.signal?.addEventListener('abort', () => reject(new Error('abort'))))
+      );
+      integration = create([
+        { url: COLLECTOR, events: ['rr'], keys: [], batchSize: 10000, urlFilter: 'full' },
+        { url: OTHER_COLLECTOR, events: ['rr'], keys: [], batchSize: 10000, urlFilter: 'full' },
+      ]);
+      // 200 records (the queue limit) of about 500 bytes per target
+      for (let i = 0; i < 200; i++) {
+        await receive(HttpRequestType.MEDIA_VIDEO, `https://cdn.example.com/seg.m4s?q=${'a'.repeat(400)}`);
+      }
+      window.dispatchEvent(new Event('pagehide'));
+      const requests = fetchMock.mock.calls.map((call) => call[1]);
+      for (const request of requests.filter((request) => request.keepalive)) {
+        expect(request.body.length).toBeLessThanOrEqual(64000);
+      }
+      const keepaliveBytes = requests
+        .filter((request) => request.keepalive)
+        .reduce((sum, request) => sum + request.body.length, 0);
+      expect(keepaliveBytes).toBeLessThanOrEqual(64000);
+      expect(keepaliveBytes).toBeGreaterThan(0);
+      expect(requests.length).toBeGreaterThan(2);
+
+      // The timeout ends the requests and frees the budget.
+      jest.advanceTimersByTime(10000);
+      await settle();
+      fetchMock.mockImplementation(() => Promise.resolve({ status: 204 }));
+      integration.destroy();
+      await settle();
+      integration = create([{ url: COLLECTOR, events: ['ce'], keys: [], batchSize: 10 }]);
+      integration.sendCustomEvent('a');
+      window.dispatchEvent(new Event('pagehide'));
+      expect(fetchMock.mock.calls[fetchMock.mock.calls.length - 1][1].keepalive).toBe(true);
+    });
+
+    it('4: aborts a request without response after 10 s and retries', async () => {
+      fetchMock.mockImplementationOnce(
+        (_url, init) =>
+          new Promise((_resolve, reject) => init.signal?.addEventListener('abort', () => reject(new Error('abort'))))
+      );
+      integration = create([{ url: COLLECTOR, events: ['ce'], keys: [] }]);
+      integration.sendCustomEvent('a');
+      integration.sendCustomEvent('b');
+      jest.advanceTimersByTime(10000);
+      await settle();
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+      jest.advanceTimersByTime(2000);
+      await settle();
+      expect(requestsTo(COLLECTOR).map((request) => request.body.split('\n').length)).toEqual([1, 2]);
+    });
+
+    it('5: matches retries and concurrent requests of the same URL by request object', async () => {
+      integration = create([{ url: COLLECTOR, events: ['rr'], keys: [] }], { useQueryArgs: true, version: 2 });
+      const respond = (request: Awaited<ReturnType<CmcdIntegration['preprocessHttpRequest']>>) =>
+        integration.preprocessHttpResponse(HttpRequestType.MEDIA_VIDEO, {
+          request,
+          url: request.url,
+          headers: {},
+          status: 200,
+          elapsedTime: 0.1,
+        } as unknown as Parameters<CmcdIntegration['preprocessHttpResponse']>[1]);
+      const first = await sendRequest(HttpRequestType.MEDIA_VIDEO, SEGMENT);
+      jest.advanceTimersByTime(1000);
+      const second = await sendRequest(HttpRequestType.MEDIA_VIDEO, SEGMENT);
+      jest.advanceTimersByTime(1000);
+      await respond(first);
+      await respond(first);
+      await respond(second);
+      expect((await parsedTo()).map((record) => Number(record.ts) - START)).toEqual([0, 0, 1000]);
+    });
+
+    it('6: omits ttfb 0', async () => {
+      integration = create([{ url: COLLECTOR, events: ['rr'], keys: ['ttfb'] }]);
+      await receive(HttpRequestType.MEDIA_VIDEO, SEGMENT, { timeToFirstByte: 0 });
+      expect((await parsedTo())[0].ttfb).toBeUndefined();
+    });
+
+    it('7: resumes a target stopped by 410 with a new session id', async () => {
+      statuses = [410];
+      integration = create([{ url: COLLECTOR, events: ['ce'], keys: [] }]);
+      integration.sendCustomEvent('a');
+      await settle();
+      integration.sendCustomEvent('b');
+      integration.setSessionId('next-session');
+      integration.sendCustomEvent('c');
+      expect((await parsedTo()).map((record) => record.cen)).toEqual(['"a"', '"c"']);
+    });
+
+    it('8: on player Destroy, flushes and removes the player and page listeners', async () => {
+      integration = create([{ url: COLLECTOR, events: ['ce', 'm'], keys: [], batchSize: 10 }]);
+      integration.sendCustomEvent('a');
+      emit('destroy');
+      expect(Object.values(handlers).every((list) => list.length === 0)).toBe(true);
+      window.dispatchEvent(new Event('online'));
+      expect(await recordsTo()).toHaveLength(1);
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+    });
+
+    it('9: rejects a custom event name that is not printable ASCII', async () => {
+      integration = create([{ url: COLLECTOR, events: ['ce'], keys: [] }]);
+      integration.sendCustomEvent('café');
+      expect(await recordsTo()).toHaveLength(0);
+      expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('printable ASCII'));
+    });
+
+    it.each([
+      ['seconds', '30'],
+      ['HTTP date', new Date(START + 30000).toUTCString()],
+    ])('10: waits for Retry-After in %s', async (_name, retryAfter) => {
+      fetchMock.mockImplementationOnce(() => Promise.resolve(response(429, { 'Retry-After': retryAfter })));
+      integration = create([{ url: COLLECTOR, events: ['ce'], keys: [] }]);
+      integration.sendCustomEvent('a');
+      await settle();
+      jest.advanceTimersByTime(29000);
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+      jest.advanceTimersByTime(1000);
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+    });
+
+    it('11: uses an intervalMs of at least 1000', async () => {
+      integration = create([{ url: COLLECTOR, events: ['t'], keys: [], intervalMs: 200 }]);
+      emit('sourceloaded');
+      jest.advanceTimersByTime(3000);
+      expect(await recordsTo()).toHaveLength(3);
+    });
+  });
+
   describe('no-throw', () => {
     it('does not throw if player APIs throw', async () => {
       const throwing = () => {
@@ -697,14 +888,14 @@ describe('CmcdIntegration Event Mode', () => {
       expect((await parsedTo()).map((record) => record.e)).toEqual(['m', 'ce', 't', 'rr']);
     });
 
-    it('does not throw if the transport throws or rejects', async () => {
-      transport.mockImplementation(() => {
+    it('does not throw if fetch throws or rejects', async () => {
+      fetchMock.mockImplementation(() => {
         throw new Error('boom');
       });
       integration = create([{ url: COLLECTOR, events: ['ce'] }]);
       expect(() => integration.sendCustomEvent('a')).not.toThrow();
       await settle();
-      transport.mockImplementation(() => Promise.reject(new Error('offline')));
+      fetchMock.mockImplementation(() => Promise.reject(new Error('offline')));
       expect(() => jest.advanceTimersByTime(10000)).not.toThrow();
       await settle();
     });

@@ -1,12 +1,11 @@
 /**
  * CMCD v2 Event Mode: turns player events, responses and API calls into reports for the configured targets.
- *
- * The integration provides the state it tracks for Request Mode as well (ids, play state, rebuffering,
- * playhead, throughput). This module reads the remaining keys from the player.
+ * The integration provides the state keys, which it collects for Request Mode as well.
  */
 
 import {
   AudioDownloadQualityChangedEvent,
+  HttpRequest,
   HttpRequestType,
   HttpResponse,
   HttpResponseBody,
@@ -16,34 +15,21 @@ import {
   VideoDownloadQualityChangedEvent,
 } from 'bitmovin-player';
 import {
-  CMCD_V2_EVENT_KEYS,
   CmcdCustomKey,
   CmcdData,
   CmcdEventType,
   CmcdObjectTypeToken,
   CmcdPlayStateToken,
-  CmcdStreamTypeToken,
   CmcdTypedValue,
   CmcdVersionNumbers,
 } from './Cmcd';
-import { CmcdTransport } from './CmcdEventReporter';
-import { CmcdEventTarget, CmcdEventTargetState } from './CmcdEventTarget';
-
-/** Dependencies that tests replace */
-export interface CmcdEnvironment {
-  /** Default: `fetch` */
-  transport?: CmcdTransport;
-  /** Default: `Date.now` */
-  now?: () => number;
-}
+import { CmcdEventReporter, CmcdEventTarget } from './CmcdEventTarget';
 
 /** State that the integration tracks */
 export interface CmcdEventSource {
-  /** `cid`, `sid`, `sf`, `sta`, `bsa`, `bsda`, `dfa`, `pt`, `ltc` and `mtp`, as far as known */
+  /** State keys, including the media keys per object type, except `br` */
   getStateData(): CmcdData;
   getPlayState(): CmcdPlayStateToken;
-  isRebuffering(): boolean;
-  getObjectType(type: HttpRequestType): CmcdObjectTypeToken;
 }
 
 export type CmcdPlayerEventRegistration = <T extends PlayerEventBase>(
@@ -51,9 +37,11 @@ export type CmcdPlayerEventRegistration = <T extends PlayerEventBase>(
   callback: (event?: T) => void
 ) => void;
 
-/** Maximum number of requests waiting for their response, to correlate `rr` reports */
-const MAX_PENDING_REQUESTS = 64;
-const MAX_CUSTOM_EVENT_NAME_LENGTH = 64;
+/** `cen`: printable ASCII, max. 64 characters */
+const CUSTOM_EVENT_NAME_REGEX = /^[\x20-\x7e]{1,64}$/;
+const MAX_HOSTNAME_LENGTH = 128;
+/** Manifest (without ads) and audio and video segment requests, by `HttpRequestType` value */
+const CONTENT_REQUEST_TYPE_REGEX = /^(manifest\/(dash|hls|smooth)|media\/(audio|video))/;
 
 /** Runs `fn` and returns its result, or `undefined` if it throws. */
 export function attempt<T>(fn: () => T): T | undefined {
@@ -67,22 +55,23 @@ export function attempt<T>(fn: () => T): T | undefined {
 /** Base64 of the header value (case-insensitive name), or `undefined` */
 function headerToBase64(headers: { [name: string]: string } | undefined, name: string): string | undefined {
   const lowerName = name.toLowerCase();
-  for (const key of Object.keys(headers || {})) {
-    if (key.toLowerCase() === lowerName && headers![key]) {
-      return attempt(() => btoa(headers![key]));
+  let value = '';
+  Object.keys(headers || {}).forEach((key) => {
+    if (key.toLowerCase() === lowerName) {
+      value = headers![key];
     }
-  }
-  return undefined;
+  });
+  return value ? attempt(() => btoa(value)) : undefined;
 }
 
-/** Seconds to ms, or `undefined` if not a valid duration */
+/** Seconds to ms, or `undefined` if not a valid duration. 0 is unknown. */
 function toMilliseconds(seconds: number | undefined): number | undefined {
-  return typeof seconds === 'number' && isFinite(seconds) && seconds >= 0 ? seconds * 1000 : undefined;
+  return typeof seconds === 'number' && isFinite(seconds) && seconds > 0 ? seconds * 1000 : undefined;
 }
 
 export class CmcdEventMode {
-  private readonly targets: CmcdEventTargetState[] = [];
-  private readonly now: () => number;
+  public readonly targets: CmcdEventReporter[] = [];
+  public readonly isEnabled: boolean = false;
   private player?: PlayerAPI;
   /** Last reported play state, `null` if none for the current source */
   private playState: CmcdPlayStateToken | null = null;
@@ -92,37 +81,32 @@ export class CmcdEventMode {
   private downloadBitrates: { audio?: number; video?: number } = {};
   private isAdBreakActive = false;
   private isAdActive = false;
-  /** Request start time and URL before CMCD was added, by the URL of the sent request */
-  private pendingRequests = new Map<string, { url: string; time: number }>();
+  /** Start time and URL before CMCD per request. The player passes the same object for retries. */
+  private requests = new WeakMap<HttpRequest, { url: string; time: number }>();
   private pageListeners: { target: EventTarget; event: string; callback: () => void }[] = [];
 
   constructor(
     configs: CmcdEventTarget[],
     private readonly source: CmcdEventSource,
-    environment: CmcdEnvironment,
     private readonly warn: (message: string) => void
   ) {
-    this.now = environment.now || (() => Date.now());
     if (configs.length === 0) {
       return;
     }
-    let transport = environment.transport;
-    if (!transport) {
-      if (typeof fetch !== 'function') {
-        warn('CMCD: Event Mode is disabled, as fetch is not available.');
-        return;
-      }
-      transport = (url, request) => fetch(url, request);
+    if (typeof fetch !== 'function') {
+      warn('CMCD: Event Mode disabled, fetch not available');
+      return;
     }
     for (const config of configs) {
       if (config && typeof config.url === 'string' && config.url) {
-        this.targets.push(new CmcdEventTargetState(config, transport, warn));
+        this.targets.push(new CmcdEventReporter(config, warn));
       } else {
-        warn('CMCD: an event target without url is ignored.');
+        warn('CMCD: event target without url ignored');
       }
     }
 
-    if (this.targets.length > 0 && typeof window !== 'undefined' && typeof document !== 'undefined') {
+    this.isEnabled = this.targets.length > 0;
+    if (this.isEnabled && typeof window !== 'undefined' && typeof document !== 'undefined') {
       // Last chance to send before the page is closed or frozen
       const flushNow = () => this.flush(true);
       this.addPageListener(window, 'pagehide', flushNow);
@@ -135,29 +119,31 @@ export class CmcdEventMode {
     }
   }
 
-  public get isEnabled(): boolean {
-    return this.targets.length > 0;
-  }
-
   /** Registers the player listeners with `on`, which the integration removes when the player changes. */
   public setPlayer(player: PlayerAPI, on: CmcdPlayerEventRegistration): void {
     this.player = player;
     const events = player.exports.PlayerEvent;
     const report = (type: CmcdEventType) => (event?: PlayerEventBase) => this.report(type, this.timeOf(event));
     const onPlayStateEvent = (event?: PlayerEventBase) => this.reportPlayState(event);
-    const endSource = () => {
-      this.stopIntervals();
+
+    const startIntervals = () =>
+      this.targets.forEach((target) =>
+        target.startInterval(() => {
+          this.report('t', Date.now(), {}, undefined, [], target);
+          target.flush();
+        })
+      );
+
+    on(events.SourceLoaded, (event?: PlayerEventBase) => {
+      startIntervals();
+      this.reportPlayState(event);
+    });
+    on(events.SourceUnloaded, () => {
+      this.targets.forEach((target) => target.stopInterval());
       this.playState = null;
       this.downloadBitrates = {};
       this.flush(true);
-    };
-
-    on(events.SourceLoaded, (event?: PlayerEventBase) => {
-      this.startIntervals();
-      this.reportPlayState(event);
     });
-    on(events.SourceUnloaded, endSource);
-    on(events.Destroy, endSource);
     for (const event of [
       events.Play,
       events.Playing,
@@ -166,12 +152,18 @@ export class CmcdEventMode {
       events.Seeked,
       events.TimeShift,
       events.TimeShifted,
-      events.StallStarted,
       events.StallEnded,
       events.PlaybackFinished,
     ]) {
       on(event, onPlayStateEvent);
     }
+    on(events.StallStarted, (event?: PlayerEventBase) => {
+      this.reportPlayState(event);
+      // After the `ps` report, which does not carry `bs` yet
+      if (this.playState === CmcdPlayStateToken.Rebuffering) {
+        this.targets.forEach((target) => target.markStarved());
+      }
+    });
     // The integration buffers the error code (`ec`) before.
     on(events.Error, (event?: PlayerEventBase) => {
       this.report('e', this.timeOf(event));
@@ -226,61 +218,32 @@ export class CmcdEventMode {
 
     // The source may be loaded before `setPlayer`.
     if (attempt(() => player.getSource())) {
-      this.startIntervals();
+      startIntervals();
     }
-  }
-
-  public onRebufferingEnded(duration: number): void {
-    this.targets.forEach((target) => target.addRebuffering(duration));
-  }
-
-  public onError(code: string): void {
-    this.targets.forEach((target) => target.addErrorCode(code));
-  }
-
-  public onStartupDelay(delay: number): void {
-    this.targets.forEach((target) => target.setStartupDelay(delay));
-  }
-
-  public resetSession(): void {
-    this.targets.forEach((target) => target.resetSession());
   }
 
   public onContentIdChanged(): void {
-    this.report('c', this.now());
+    this.report('c', Date.now());
   }
 
   public sendCustomEvent(name: string, customKeys: CmcdCustomKey[]): void {
-    if (typeof name !== 'string' || !name || name.length > MAX_CUSTOM_EVENT_NAME_LENGTH) {
-      this.warn(`CMCD: custom event name '${name}' is empty or exceeds 64 characters and is not sent.`);
+    if (typeof name !== 'string' || !CUSTOM_EVENT_NAME_REGEX.test(name)) {
+      this.warn(`CMCD: custom event name '${name}' not sent, needs 1 to 64 printable ASCII characters`);
       return;
     }
-    this.report('ce', this.now(), { cen: name }, undefined, Array.isArray(customKeys) ? customKeys : []);
+    this.report('ce', Date.now(), { cen: name }, undefined, Array.isArray(customKeys) ? customKeys : []);
   }
 
-  /** Tracks requests for `rr` reports and the hostname for `h`. `sentUrl` includes CMCD in query mode. */
-  public onRequest(type: HttpRequestType, originalUrl: string, sentUrl: string): void {
+  /** Tracks requests for `rr` reports and the hostname for `h`. */
+  public onRequest(type: HttpRequestType, request: HttpRequest, originalUrl: string): void {
     try {
-      const time = this.now();
-      if (this.reportsEvent('rr')) {
-        if (this.pendingRequests.size >= MAX_PENDING_REQUESTS) {
-          this.pendingRequests.delete(this.pendingRequests.keys().next().value as string);
-        }
-        this.pendingRequests.set(sentUrl, { url: originalUrl, time });
+      const time = Date.now();
+      // A retry keeps the first start time and URL.
+      if (!this.requests.has(request)) {
+        this.requests.set(request, { url: originalUrl, time });
       }
 
-      const requestTypes = this.player?.exports.HttpRequestType;
-      const contentRequestTypes = requestTypes
-        ? [
-            requestTypes.MANIFEST_DASH,
-            requestTypes.MANIFEST_HLS_MASTER,
-            requestTypes.MANIFEST_HLS_VARIANT,
-            requestTypes.MANIFEST_SMOOTH,
-            requestTypes.MEDIA_AUDIO,
-            requestTypes.MEDIA_VIDEO,
-          ]
-        : [];
-      if (contentRequestTypes.indexOf(type) === -1) {
+      if (!CONTENT_REQUEST_TYPE_REGEX.test(type)) {
         return;
       }
       const hostname = new URL(originalUrl).hostname;
@@ -293,39 +256,30 @@ export class CmcdEventMode {
         }
       }
     } catch (error) {
-      this.warn(`CMCD: event report failed: ${error}`);
+      this.fail(error);
     }
   }
 
-  public onResponse(type: HttpRequestType, response: HttpResponse<HttpResponseBody>): void {
+  /** `objectType` of the request */
+  public onResponse(response: HttpResponse<HttpResponseBody>, objectType: CmcdObjectTypeToken): void {
     try {
-      const sentUrl = response.request ? response.request.url : response.url;
-      const pending = this.pendingRequests.get(sentUrl);
-      this.pendingRequests.delete(sentUrl);
-      if (!this.reportsEvent('rr')) {
-        return;
-      }
-
-      const data: CmcdData = { ot: this.source.getObjectType(type) };
+      const request = response.request;
+      const pending = request ? this.requests.get(request) : undefined;
+      const data: CmcdData = { ot: objectType };
       if (typeof response.status === 'number') {
         data.rc = response.status;
       }
       const elapsedMs = toMilliseconds(response.elapsedTime);
-      if (elapsedMs !== undefined) {
-        data.ttlb = elapsedMs;
-      }
-      const timeToFirstByteMs = toMilliseconds(response.timeToFirstByte);
-      if (timeToFirstByteMs !== undefined) {
-        data.ttfb = timeToFirstByteMs;
-      }
+      data.ttlb = elapsedMs;
+      data.ttfb = toMilliseconds(response.timeToFirstByte);
       data.cmsdd = headerToBase64(response.headers, 'CMSD-Dynamic');
       data.cmsds = headerToBase64(response.headers, 'CMSD-Static');
 
       // `ts` is the request start.
-      const time = pending ? pending.time : this.now() - (elapsedMs || 0);
-      this.report('rr', time, data, pending ? pending.url : sentUrl);
+      const time = pending ? pending.time : Date.now() - (elapsedMs || 0);
+      this.report('rr', time, data, pending ? pending.url : request ? request.url : response.url);
     } catch (error) {
-      this.warn(`CMCD: event report failed: ${error}`);
+      this.fail(error);
     }
   }
 
@@ -336,14 +290,16 @@ export class CmcdEventMode {
 
   /** Sends the queued reports, then stops all targets and removes the page listeners. */
   public destroy(): void {
-    this.flush(true);
-    this.targets.forEach((target) => target.stop());
+    this.targets.forEach((target) => target.destroy());
     for (const listener of this.pageListeners) {
       listener.target.removeEventListener(listener.event, listener.callback);
     }
     this.pageListeners = [];
-    this.pendingRequests.clear();
     this.player = undefined;
+  }
+
+  private fail(error: unknown) {
+    this.warn(`CMCD: event report failed: ${error}`);
   }
 
   private addPageListener(target: EventTarget, event: string, callback: () => void) {
@@ -351,25 +307,8 @@ export class CmcdEventMode {
     target.addEventListener(event, callback);
   }
 
-  private startIntervals() {
-    this.targets.forEach((target) =>
-      target.startInterval(() => {
-        this.report('t', this.now(), {}, undefined, [], target);
-        target.flush();
-      })
-    );
-  }
-
-  private stopIntervals() {
-    this.targets.forEach((target) => target.stopInterval());
-  }
-
   private timeOf(event?: PlayerEventBase): number {
-    return (event && event.timestamp) || this.now();
-  }
-
-  private reportsEvent(type: CmcdEventType): boolean {
-    return this.targets.some((target) => target.reports(type));
+    return (event && event.timestamp) || Date.now();
   }
 
   /** Reports `ps` if the play state differs from the last reported one. */
@@ -388,7 +327,7 @@ export class CmcdEventMode {
     eventData: CmcdData = {},
     requestUrl?: string,
     customKeys: CmcdCustomKey[] = [],
-    onlyTarget?: CmcdEventTargetState
+    onlyTarget?: CmcdEventReporter
   ) {
     try {
       const targets = (onlyTarget ? [onlyTarget] : this.targets).filter((target) => target.reports(type));
@@ -396,74 +335,42 @@ export class CmcdEventMode {
         return;
       }
       const snapshot = this.gatherSnapshot();
-      const isRebuffering = !!attempt(() => this.source.isRebuffering());
       for (const target of targets) {
-        const data: CmcdData = { ...snapshot, ...eventData, e: type, ts: time, v: CmcdVersionNumbers.v2 };
-        target.report(data, isRebuffering, requestUrl, customKeys);
+        target.report(
+          Object.assign({}, snapshot, eventData, { e: type, ts: time, v: CmcdVersionNumbers.v2 }),
+          requestUrl,
+          customKeys
+        );
       }
     } catch (error) {
-      this.warn(`CMCD: event report failed: ${error}`);
+      this.fail(error);
     }
   }
 
   /** Keys that describe the player and session state, the same for all targets */
   private gatherSnapshot(): CmcdData {
     const data: CmcdData = attempt(() => this.source.getStateData()) || {};
-    if (this.hostname && this.hostname.length <= CMCD_V2_EVENT_KEYS.h!.maxLength!) {
+    if (this.hostname && this.hostname.length <= MAX_HOSTNAME_LENGTH) {
       data.h = this.hostname;
     }
+    // `br` of the selected (downloaded) quality, not of a requested object
     const player = this.player;
-    if (!player) {
-      return data;
+    const br: CmcdTypedValue[] = [];
+    (['video', 'audio'] as const).forEach((mediaType) => {
+      const isAudio = mediaType === 'audio';
+      const bitrate =
+        this.downloadBitrates[mediaType] ??
+        attempt(() => (isAudio ? player!.getDownloadedAudioData() : player!.getDownloadedVideoData()).bitrate);
+      if (typeof bitrate === 'number' && bitrate > 0) {
+        br.push({
+          value: bitrate / 1000,
+          type: isAudio ? CmcdObjectTypeToken.AudioOnly : CmcdObjectTypeToken.VideoOnly,
+        });
+      }
+    });
+    if (br.length > 0) {
+      data.br = br;
     }
-    attempt(() => {
-      data.st = player.isLive() ? CmcdStreamTypeToken.Live : CmcdStreamTypeToken.Vod;
-    });
-    attempt(() => {
-      data.pr = player.isPlaying() ? player.getPlaybackSpeed() : 0;
-    });
-    this.addMediaData(data, player, 'video');
-    this.addMediaData(data, player, 'audio');
     return data;
-  }
-
-  /** Adds the bitrate and buffer keys of a media type, with the object type as parameter. */
-  private addMediaData(data: CmcdData, player: PlayerAPI, mediaType: 'audio' | 'video') {
-    const isAudio = mediaType === 'audio';
-    const type = isAudio ? CmcdObjectTypeToken.AudioOnly : CmcdObjectTypeToken.VideoOnly;
-    const add = (key: 'bl' | 'br' | 'lb' | 'pb' | 'tb' | 'tbl', value: number | undefined, allowZero = false) => {
-      if (typeof value === 'number' && isFinite(value) && (value > 0 || (allowZero && value === 0))) {
-        data[key] = ((data[key] as CmcdTypedValue[] | undefined) || []).concat({ value, type });
-      }
-    };
-
-    attempt(() => {
-      const buffer = player.buffer.getLevel(
-        player.exports.BufferType.ForwardDuration,
-        isAudio ? player.exports.MediaType.Audio : player.exports.MediaType.Video
-      );
-      if (buffer.targetLevel > 0) {
-        add('bl', buffer.level * 1000, true);
-        add('tbl', buffer.targetLevel * 1000);
-      }
-    });
-    const downloadBitrate =
-      this.downloadBitrates[mediaType] ??
-      attempt(() => (isAudio ? player.getDownloadedAudioData() : player.getDownloadedVideoData()).bitrate);
-    add('br', downloadBitrate !== undefined ? downloadBitrate / 1000 : undefined);
-    add(
-      'pb',
-      attempt(() => (isAudio ? player.getPlaybackAudioData() : player.getPlaybackVideoData()).bitrate / 1000)
-    );
-    const bitrates =
-      attempt(() =>
-        (isAudio ? player.getAvailableAudioQualities() : player.getAvailableVideoQualities())
-          .map((quality) => quality.bitrate)
-          .filter((bitrate) => bitrate > 0)
-      ) || [];
-    if (bitrates.length > 0) {
-      add('tb', Math.max.apply(null, bitrates) / 1000);
-      add('lb', Math.min.apply(null, bitrates) / 1000);
-    }
   }
 }
