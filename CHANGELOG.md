@@ -6,9 +6,12 @@ The format is based on [Keep a Changelog](http://keepachangelog.com/)
 and this project adheres to [Semantic Versioning](http://semver.org/).
 
 ## [Unreleased]
+### Added
+- Opt-in CMCD v2 (CTA-5004-A) Request Mode with `CmcdConfig.version: 2`. Sends `v=2`, inner lists with object type parameters, `pr` in `CMCD-Status`, `cid` of up to 128 characters, and the new keys `sta`, `sn`, `msd`, `pt`, `bsa`, `bsd`, `bsda`, `ec`, `lb`, `tbl`, `pb`, `dfa` and `ltc`. Without `version`, or with `version: 1`, the output is unchanged.
+
 ### Changed
 - Internal refactoring of CMCD encoding in preparation for CMCD v2; no change in output for valid values.
-- Type declarations in `Cmcd.d.ts`: `CmcdBase`, the per-key classes (e.g. `CmcdEncodedBitrate`, `CmcdSessionId`) and `cmcdDataToJson` are removed. `cmcdDataToHeader` and `cmcdDataToUrlParameter` now take a `CmcdData` object and the custom keys instead of a list of key objects. None of these were part of the bundle's exports.
+- Type declarations in `Cmcd.d.ts`: `CmcdBase`, `CmcdKeysToken`, the per-key classes (e.g. `CmcdEncodedBitrate`, `CmcdSessionId`) and `cmcdDataToJson` are removed. `cmcdDataToHeader` and `cmcdDataToUrlParameter` now take a `CmcdData` object and the custom keys instead of a list of key objects. None of these were part of the bundle's exports.
 
 ### Deprecated
 - `CustomKey.keyValuePairToString`. Encoding is done for all keys of a request at once.
@@ -20,6 +23,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/).
 - `preprocessHttpResponse` threw if the player passed no response (e.g. after a network error), which could prevent the request from being retried. A missing response is now passed on unchanged.
 - `preprocessHttpRequest` could throw for values that cannot be encoded, e.g. a lone surrogate in a content id in query mode. The request is now sent without CMCD data and a console warning is logged.
 - In HTTP header mode, string values and custom key names that are not printable ASCII (e.g. line breaks or `é`) were sent in the CMCD headers. Such keys are now omitted with a console warning.
+- `preprocessHttpRequest` threw if no player was set or a player API threw while collecting the data. The request is now sent without CMCD data and a console warning is logged once.
+- Calling `setPlayer` again registered all player event listeners a second time. The listeners of the previous player are now removed.
 
 ## [0.6.1] - 2026-11-20
 ### Fixed

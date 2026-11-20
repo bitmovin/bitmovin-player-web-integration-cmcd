@@ -9,7 +9,12 @@ export class SfToken {
   constructor(public readonly value: string) {}
 }
 
-export type SfBareItem = number | string | boolean | SfToken;
+/** Marks a number as Decimal, so integral values are serialized as e.g. `2.0`. */
+export class SfDecimal {
+  constructor(public readonly value: number) {}
+}
+
+export type SfBareItem = number | string | boolean | SfToken | SfDecimal;
 
 export interface SfParameters {
   [key: string]: SfBareItem;
@@ -97,10 +102,13 @@ export function serializeKey(key: string): string {
   return key;
 }
 
-/** Numbers are serialized as Integer if integral, otherwise as Decimal. */
+/** Numbers are serialized as Integer if integral, otherwise as Decimal. Use `SfDecimal` to force a Decimal. */
 export function serializeBareItem(value: SfBareItem): string {
   if (value instanceof SfToken) {
     return serializeToken(value.value);
+  }
+  if (value instanceof SfDecimal) {
+    return serializeDecimal(value.value);
   }
   switch (typeof value) {
     case 'number':
