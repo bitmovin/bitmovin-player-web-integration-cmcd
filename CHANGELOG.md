@@ -8,6 +8,12 @@ and this project adheres to [Semantic Versioning](http://semver.org/).
 ## [Unreleased]
 ### Fixed
 - Measured throughput (`mtp`) was reported in kilobytes per second instead of kilobits per second, making the value 8x too low (and frequently rounding down to 0, so the key was omitted entirely). Throughput is now converted from bytes to bits before scaling to kbps.
+- Next object request (`nor`) contained the absolute URL of the next segment. It is now the path relative to the current request, URL encoded as required by the specification. `nor` is omitted if the next segment is on a different origin.
+- Measured throughput (`mtp`) was sent as `mtp=0` for throughputs below 50 kbps. The key is now omitted in this case.
+- Requested maximum throughput (`rtp`) was never sent. It is now sent for media segment requests outside of startup and buffer starvation, with 5 times the encoded bitrate (`br`), rounded to the nearest 100 kbps.
+- Startup (`su`) was sent on all requests until the first seek or stall. It is now cleared when playback starts.
+- Audio segment requests used the video segments to determine `nor` and object duration (`d`).
+- Object duration (`d`) was sent as `NaN` if the segment duration is unknown.
 
 ## [0.6.0] - 2026-07-29
 ### Changed
