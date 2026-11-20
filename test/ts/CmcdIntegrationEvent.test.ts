@@ -900,6 +900,15 @@ describe('CmcdIntegration Event Mode', () => {
       await settle();
     });
 
+    it('does not report or throw without a response', async () => {
+      integration = create([{ url: COLLECTOR, events: ['rr'] }]);
+      const missing = undefined as unknown as Parameters<CmcdIntegration['preprocessHttpResponse']>[1];
+      await expect(integration.preprocessHttpResponse(HttpRequestType.MEDIA_VIDEO, missing)).resolves.toBeUndefined();
+      expect(await recordsTo()).toHaveLength(0);
+      // Event Mode does not read the missing response.
+      expect(warnSpy).not.toHaveBeenCalled();
+    });
+
     it('does not throw for invalid URLs and custom keys', async () => {
       integration = create([{ url: COLLECTOR, events: ['rr', 'ce'] }]);
       await expect(receive(HttpRequestType.MEDIA_VIDEO, 'not a url')).resolves.toBeUndefined();
