@@ -6,7 +6,7 @@
  * - JSON is not supported, only HTTP Headers and Query Args.
  */
 
-import { isInteger, quoteString, serializeToken } from './StructuredField';
+import { quoteString, serializeString, serializeToken } from './StructuredField';
 
 export enum CmcdObjectTypeToken {
   AudioOnly = 'a',
@@ -133,7 +133,8 @@ export interface CmcdKeyInfo {
   urlEncode?: boolean;
 }
 
-export type CmcdKeyTable = { [K in keyof CmcdData]-?: CmcdKeyInfo };
+/** Keys of a CMCD version. Keys without an entry are not sent. */
+export type CmcdKeyTable = { [K in keyof CmcdData]?: CmcdKeyInfo };
 
 export const CMCD_V1_KEYS: CmcdKeyTable = {
   br: { header: CmcdHeaderType.Object, type: 'integer', round: 1 },
@@ -157,11 +158,17 @@ export const CMCD_V1_KEYS: CmcdKeyTable = {
   v: { header: CmcdHeaderType.Session, type: 'integer', omit: 1 },
 };
 
+const PRINTABLE_ASCII_REGEX = /^[\x20-\x7e]*$/;
+
 /**
  * Serializes one v1 key-value pair. Returns `null` if the key is not sent.
  * Without `info` (custom keys), only the generic rules apply.
+ * `forHeader` rejects keys and strings that are not printable ASCII, as HTTP header values must not contain them.
  */
-function encodeV1Member(key: string, value: CmcdValue, info?: CmcdKeyInfo): string | null {
+function encodeV1Member(key: string, value: CmcdValue, info?: CmcdKeyInfo, forHeader = false): string | null {
+  if (forHeader && !PRINTABLE_ASCII_REGEX.test(key)) {
+    throw new TypeError(`Not a printable ASCII key: ${key}`);
+  }
   if (info) {
     if (info.round) {
       value = Math.round((value as number) / info.round) * info.round;
@@ -183,8 +190,8 @@ function encodeV1Member(key: string, value: CmcdValue, info?: CmcdKeyInfo): stri
     return key;
   }
   if (typeof value === 'string') {
-    // v1: characters outside printable ASCII are sent as is (RFC 8941 rejects them).
-    return `${key}=${quoteString(value)}`;
+    // v1: in query mode, characters outside printable ASCII are sent URL encoded (RFC 8941 rejects them).
+    return `${key}=${forHeader ? serializeString(value) : quoteString(value)}`;
   }
   // v1: numbers are sent as JavaScript formats them. RFC 8941 would round decimals to 3 fractional
   // digits and reject integers beyond ±999,999,999,999,999. `false` is sent as `false`, not `?0`.
@@ -197,14 +204,24 @@ interface CmcdEntry {
   member: string;
 }
 
-function toEntries(data: CmcdData, customKeys: CmcdCustomKey[]): CmcdEntry[] {
+/** Warnings already logged, to log each invalid key or value only once */
+const loggedWarnings = new Set<string>();
+
+function warnOnce(message: string) {
+  if (!loggedWarnings.has(message)) {
+    loggedWarnings.add(message);
+    console.warn(message);
+  }
+}
+
+function toEntries(data: CmcdData, customKeys: CmcdCustomKey[], forHeader: boolean): CmcdEntry[] {
   const entries: CmcdEntry[] = [];
   const add = (key: string, value: CmcdValue, header: CmcdHeaderType | null, info?: CmcdKeyInfo) => {
     let member: string | null = null;
     try {
-      member = encodeV1Member(key, value, info);
+      member = encodeV1Member(key, value, info, forHeader);
     } catch (error) {
-      console.warn(`CMCD: '${key}' is not sent: ${(error as Error).message}`);
+      warnOnce(`CMCD: '${key}' is not sent: ${(error as Error).message}`);
     }
     if (member !== null) {
       entries.push({ key, header, member });
@@ -233,7 +250,7 @@ function joinMembers(entries: CmcdEntry[]): string {
 }
 
 export function cmcdDataToHeader(data: CmcdData, customKeys: CmcdCustomKey[] = []): CmcdHeaders {
-  const entries = toEntries(data, customKeys);
+  const entries = toEntries(data, customKeys, true);
   const headers: CmcdHeaders = {};
 
   for (const header of [CmcdHeaderType.Request, CmcdHeaderType.Object, CmcdHeaderType.Status, CmcdHeaderType.Session]) {
@@ -250,7 +267,8 @@ export function cmcdDataToHeader(data: CmcdData, customKeys: CmcdCustomKey[] = [
 export function cmcdDataToUrlParameter(data: CmcdData, customKeys: CmcdCustomKey[] = []): string {
   // 10. If the data payload is transmitted as a query argument, then the entire payload
   // string MUST be URLEncoded per [5].
-  return `CMCD=${encodeURIComponent(joinMembers(toEntries(data, customKeys)))}`;
+  // Throws a URIError for lone surrogates.
+  return `CMCD=${encodeURIComponent(joinMembers(toEntries(data, customKeys, false)))}`;
 }
 
 export class CmcdCustomKey {

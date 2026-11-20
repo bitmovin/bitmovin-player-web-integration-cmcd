@@ -68,6 +68,17 @@ describe('StructuredField', () => {
       expect(serializeDecimal(-0.1875)).toEqual('-0.188');
     });
 
+    it('rounds ties to even for decimal ties that are not exact in binary', () => {
+      // 130.0825 * 1000 === 130082.50000000001
+      expect(serializeDecimal(130.0825)).toEqual('130.082');
+      expect(serializeDecimal(-130.0825)).toEqual('-130.082');
+      expect(serializeDecimal(1.0005)).toEqual('1.0');
+      expect(serializeDecimal(1.0015)).toEqual('1.002');
+      expect(serializeDecimal(2.0025)).toEqual('2.002');
+      expect(serializeDecimal(7.0035)).toEqual('7.004');
+      expect(serializeDecimal(12.3455)).toEqual('12.346');
+    });
+
     it('accepts up to 12 integer digits', () => {
       expect(serializeDecimal(999_999_999_999.5)).toEqual('999999999999.5');
       expect(serializeDecimal(-999_999_999_999)).toEqual('-999999999999.0');

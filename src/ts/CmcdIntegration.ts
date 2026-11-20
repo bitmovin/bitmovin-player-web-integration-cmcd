@@ -105,6 +105,7 @@ export class CmcdIntegration {
   private lastMeasuredThroughputVideo: number;
   private manifestType: CmcdStreamingFormatToken | null;
   private warnedIds = new Set<string>();
+  private warnedEncodingErrors = new Set<string>();
 
   constructor(config: CmcdConfig) {
     this.useQueryArgs = config.useQueryArgs || false;
@@ -167,15 +168,24 @@ export class CmcdIntegration {
   public preprocessHttpRequest = (type: HttpRequestType, request: HttpRequest) => {
     const data = this.gatherCmcdData(type, request);
 
-    if (this.useQueryArgs) {
-      request.url = appendCmcdQueryArg(request.url, cmcdDataToUrlParameter(data, this.customKeys));
-    } else {
-      const cmcdHeaders = cmcdDataToHeader(data, this.customKeys);
+    // An encoding error must not fail the request, so it is sent without CMCD data.
+    try {
+      if (this.useQueryArgs) {
+        request.url = appendCmcdQueryArg(request.url, cmcdDataToUrlParameter(data, this.customKeys));
+      } else {
+        const cmcdHeaders = cmcdDataToHeader(data, this.customKeys);
 
-      request.headers = {
-        ...request.headers,
-        ...cmcdHeaders,
-      };
+        request.headers = {
+          ...request.headers,
+          ...cmcdHeaders,
+        };
+      }
+    } catch (error) {
+      const message = `CMCD: data is not sent: ${error}`;
+      if (!this.warnedEncodingErrors.has(message)) {
+        this.warnedEncodingErrors.add(message);
+        console.warn(message);
+      }
     }
 
     return Promise.resolve(request);

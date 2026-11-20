@@ -1,7 +1,7 @@
 /**
  * Serializer for the subset of Structured Field Values (RFC 8941) that CMCD uses.
  *
- * All functions throw a `TypeError` or `RangeError` for values that RFC 8941 cannot represent.
+ * The `serialize*` functions throw a `TypeError` or `RangeError` for values that RFC 8941 cannot represent.
  */
 
 /** Marks a string as Token, so it is serialized without quotes. */
@@ -47,7 +47,9 @@ export function serializeDecimal(value: number): string {
   if (typeof value !== 'number' || !isFinite(value)) {
     throw new TypeError(`Not a decimal: ${value}`);
   }
-  const scaled = value * 1000;
+  // 15 significant digits remove the float error of the multiplication, e.g. 130.0825 * 1000 = 130082.50000000001.
+  // 15 digits cover the 12 integer and 3 fractional digits of the allowed range.
+  const scaled = Number((value * 1000).toPrecision(15));
   const floor = Math.floor(scaled);
   const diff = scaled - floor;
   const thousandths = diff > 0.5 || (diff === 0.5 && floor % 2 !== 0) ? floor + 1 : floor;

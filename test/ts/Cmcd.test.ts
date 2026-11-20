@@ -254,6 +254,44 @@ describe('Cmcd', () => {
         expect(cmcdDataToHeader(data)).toEqual({ 'CMCD-Object': 'br=500' });
         expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining("'ot'"));
       });
+
+      it('should warn only once per invalid key and value', () => {
+        warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => undefined);
+        const data = { ot: 'once only' as CmcdObjectTypeToken };
+
+        payload(data);
+        payload(data);
+        cmcdDataToHeader(data);
+        expect(warnSpy).toHaveBeenCalledTimes(1);
+
+        payload({ ot: 'other value' as CmcdObjectTypeToken });
+        expect(warnSpy).toHaveBeenCalledTimes(2);
+      });
+
+      it('should omit strings that are not printable ASCII in header mode', () => {
+        warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => undefined);
+
+        expect(cmcdDataToHeader({ br: 1, cid: 'café', sid: 'a\r\nX-Injected: 1' })).toEqual({ 'CMCD-Object': 'br=1' });
+        expect(
+          cmcdDataToHeader({}, [
+            new CmcdCustomKey('com.example-s', 'snow\u2603', CmcdHeaderType.Session),
+            new CmcdCustomKey('com.example-ok', 'ok', CmcdHeaderType.Session),
+          ])
+        ).toEqual({ 'CMCD-Session': 'com.example-ok="ok"' });
+        expect(warnSpy).toHaveBeenCalledTimes(3);
+      });
+
+      it('should omit custom keys whose name is not printable ASCII in header mode', () => {
+        warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => undefined);
+        const customKeys = [new CmcdCustomKey('com.example-ké', 1, CmcdHeaderType.Session)];
+
+        expect(cmcdDataToHeader({}, customKeys)).toEqual({});
+        expect(payload({}, customKeys)).toEqual('com.example-ké=1');
+      });
+
+      it('should throw a URIError for lone surrogates in query mode', () => {
+        expect(() => cmcdDataToUrlParameter({ cid: '\uD800' })).toThrow(URIError);
+      });
     });
   });
 
@@ -261,7 +299,7 @@ describe('Cmcd', () => {
     it('should assign each key to its header', () => {
       const shards: Record<string, string[]> = {};
       for (const key of Object.keys(CMCD_V1_KEYS) as (keyof CmcdData)[]) {
-        (shards[CMCD_V1_KEYS[key].header] ||= []).push(key);
+        (shards[CMCD_V1_KEYS[key]!.header] ||= []).push(key);
       }
       expect(shards).toEqual({
         [CmcdHeaderType.Object]: ['br', 'd', 'ot', 'tb'],

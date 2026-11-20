@@ -7,9 +7,15 @@ and this project adheres to [Semantic Versioning](http://semver.org/).
 
 ## [Unreleased]
 ### Changed
-- Internal refactoring of CMCD encoding in preparation for CMCD v2; no change in output.
+- Internal refactoring of CMCD encoding in preparation for CMCD v2; no change in output for valid values.
+- Type declarations in `Cmcd.d.ts`: `CmcdBase`, the per-key classes (e.g. `CmcdEncodedBitrate`, `CmcdSessionId`) and `cmcdDataToJson` are removed. `cmcdDataToHeader` and `cmcdDataToUrlParameter` now take a `CmcdData` object and the custom keys instead of a list of key objects. None of these were part of the bundle's exports.
+
+### Deprecated
+- `CustomKey.keyValuePairToString`. Encoding is done for all keys of a request at once.
 
 ### Fixed
+- `preprocessHttpRequest` could throw for values that cannot be encoded, e.g. a lone surrogate in a content id in query mode. The request is now sent without CMCD data and a console warning is logged.
+- In HTTP header mode, string values and custom key names that are not printable ASCII (e.g. line breaks or `é`) were sent in the CMCD headers. Such keys are now omitted with a console warning.
 - Measured throughput (`mtp`) was reported in kilobytes per second instead of kilobits per second, making the value 8x too low (and frequently rounding down to 0, so the key was omitted entirely). Throughput is now converted from bytes to bits before scaling to kbps.
 - Next object request (`nor`) contained the absolute URL of the next segment. It is now the path relative to the current request, URL encoded as required by the specification. `nor` is omitted if the next segment is on a different origin.
 - Measured throughput (`mtp`) was sent as `mtp=0` for throughputs below 50 kbps. The key is now omitted in this case.
