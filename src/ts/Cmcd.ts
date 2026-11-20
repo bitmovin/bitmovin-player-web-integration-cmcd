@@ -199,7 +199,7 @@ export class CmcdEncodedBitrate extends CmcdBase {
   public readonly type = CmcdHeaderType.Object;
 
   constructor(value: IntegerKbps) {
-    super(value);
+    super(Math.round(value));
   }
 }
 
@@ -276,7 +276,7 @@ export class CmcdObjectDuration extends CmcdBase {
   public readonly type = CmcdHeaderType.Object;
 
   constructor(value: IntegerMilliSecs) {
-    super(value);
+    super(Math.round(value));
   }
 }
 
@@ -544,7 +544,7 @@ export class CmcdTopBitrate extends CmcdBase {
   public readonly type = CmcdHeaderType.Object;
 
   constructor(value: IntegerKbps) {
-    super(value);
+    super(Math.round(value));
   }
 }
 
