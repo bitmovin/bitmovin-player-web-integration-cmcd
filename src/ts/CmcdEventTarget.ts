@@ -305,9 +305,11 @@ export class CmcdEventReporter {
     const status = response.status;
     if (status >= 200 && status < 300) {
       this.failures = 0;
-      // 301, 302 and 303 turn the POST into a GET without body.
+      // The redirect status is not exposed: 301, 302 and 303 turn the POST into a GET without body, 307 and 308 keep it.
       if (response.redirected) {
-        this.warn(`CMCD: ${this.url} redirected, only 307 and 308 keep the reports`);
+        this.warn(
+          `CMCD: ${this.url} was redirected. Reports are lost unless it is a 307 or 308 redirect; use the final URL.`
+        );
       }
       if (this.queue.length >= this.batchSize) {
         this.flush();

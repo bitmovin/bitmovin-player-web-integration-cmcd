@@ -697,14 +697,17 @@ describe('CmcdIntegration Event Mode', () => {
       ]);
     });
 
-    it('2: warns once if the target redirected, as 301 to 303 drop the body', async () => {
+    it('2: warns once if the target redirected, without claiming the reports were lost', async () => {
       fetchMock.mockImplementation(() => Promise.resolve(response(204, {}, true)));
       integration = create([{ url: COLLECTOR, events: ['ce'], keys: [] }]);
       integration.sendCustomEvent('a');
       await settle();
       integration.sendCustomEvent('b');
       await settle();
-      expect(warnSpy.mock.calls.filter((call) => String(call[0]).indexOf('redirected') !== -1)).toHaveLength(1);
+      const redirectWarnings = warnSpy.mock.calls.filter((call) => String(call[0]).indexOf('redirected') !== -1);
+      expect(redirectWarnings).toHaveLength(1);
+      // fetch does not expose the redirect status, so a body-keeping 307/308 is possible.
+      expect(String(redirectWarnings[0][0])).toContain('unless it is a 307 or 308 redirect');
     });
 
     it('2: drops the reports with a warning on a redirect that was not followed', async () => {

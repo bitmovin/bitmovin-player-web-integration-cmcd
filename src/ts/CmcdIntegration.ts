@@ -43,7 +43,7 @@ import { createWarnOnce } from './Log';
 import { CmcdTargetRegistry } from './CmcdTargetRegistry';
 import { attempt, CmcdEventMode } from './CmcdEventMode';
 import { CmcdEventTarget } from './CmcdEventTarget';
-import { CmcdDestinationState } from './CmcdDestinationState';
+import { CmcdDestinationState, CmcdStartupDelay } from './CmcdDestinationState';
 
 export { CmcdCustomKey as CustomKey } from './Cmcd';
 export { CmcdHeaderType as HeaderType } from './Cmcd';
@@ -162,9 +162,8 @@ export class CmcdIntegration {
   // Session state for v2 keys, reset on a new session id
   /** State per origin, in order of last use */
   private targets = new CmcdTargetRegistry(() => new CmcdDestinationState(), MAX_TARGETS);
-  /** `msd` to send with the next request */
-  private pendingStartupDelay: number | null;
-  private startupDelaySent: boolean;
+  /** Request Mode `msd`: once per session id for all origins */
+  private startupDelay = new CmcdStartupDelay();
   private rebufferingCount: number;
   private rebufferingDuration: number;
   /** Dropped frames of the previous sources of the session */
@@ -256,9 +255,7 @@ export class CmcdIntegration {
         this.hasStarted = true;
         if (this.playRequestedAt !== null) {
           const startupDelay = eventTime(event) - this.playRequestedAt;
-          if (!this.startupDelaySent) {
-            this.pendingStartupDelay = startupDelay;
-          }
+          this.startupDelay.set(startupDelay);
           this.eventMode.targets.forEach((target) => target.state.setStartupDelay(startupDelay));
         }
       }
@@ -323,8 +320,7 @@ export class CmcdIntegration {
     this.targets.forEach((target) => target.reset());
     // Not created yet when called by the constructor
     this.eventMode?.targets.forEach((target) => target.resetSession());
-    this.pendingStartupDelay = null;
-    this.startupDelaySent = false;
+    this.startupDelay?.reset();
     // An ongoing rebuffering is counted in the new session from now on.
     this.rebufferingCount = this.rebufferingStartedAt === null ? 0 : 1;
     this.rebufferingStartedAt = this.rebufferingStartedAt === null ? null : Date.now();
@@ -549,10 +545,11 @@ export class CmcdIntegration {
       data.sta = this.getPlayState();
     }
     // Once per session id, with the first request after startup
-    if (this.keys.msd && this.pendingStartupDelay !== null) {
-      data.msd = this.pendingStartupDelay;
-      this.pendingStartupDelay = null;
-      this.startupDelaySent = true;
+    if (this.keys.msd) {
+      const startupDelay = this.startupDelay.take();
+      if (startupDelay !== null) {
+        data.msd = startupDelay;
+      }
     }
     if (this.keys.bsa) {
       data.bsa = this.rebufferingCount;

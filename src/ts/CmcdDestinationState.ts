@@ -8,8 +8,7 @@ export class CmcdDestinationState {
   private sequenceNumber = 0;
   private rebufferingDurations: number[] = [];
   private errorCodes: string[] = [];
-  private startupDelay: number | null = null;
-  private startupDelaySent = false;
+  private startupDelay = new CmcdStartupDelay();
 
   public addRebuffering(duration: number): void {
     this.rebufferingDurations.push(duration);
@@ -21,11 +20,8 @@ export class CmcdDestinationState {
     }
   }
 
-  /** Sent once per session id */
   public setStartupDelay(delay: number): void {
-    if (!this.startupDelaySent) {
-      this.startupDelay = delay;
-    }
+    this.startupDelay.set(delay);
   }
 
   /** New session id */
@@ -33,8 +29,7 @@ export class CmcdDestinationState {
     this.sequenceNumber = 0;
     this.rebufferingDurations = [];
     this.errorCodes = [];
-    this.startupDelay = null;
-    this.startupDelaySent = false;
+    this.startupDelay.reset();
   }
 
   /** Adds `sn` and the buffered keys that `keys` contains. Buffered keys are sent once. */
@@ -50,10 +45,39 @@ export class CmcdDestinationState {
       data.ec = this.errorCodes;
       this.errorCodes = [];
     }
-    if (keys.msd && this.startupDelay !== null) {
-      data.msd = this.startupDelay;
-      this.startupDelay = null;
-      this.startupDelaySent = true;
+    if (keys.msd) {
+      const startupDelay = this.startupDelay.take();
+      if (startupDelay !== null) {
+        data.msd = startupDelay;
+      }
     }
+  }
+}
+
+/** `msd`, reported once per session id and scope: Request Mode, or one Event Mode target. */
+export class CmcdStartupDelay {
+  private pending: number | null = null;
+  private sent = false;
+
+  public set(delay: number): void {
+    if (!this.sent) {
+      this.pending = delay;
+    }
+  }
+
+  /** Returns the delay once, then `null` until the next session id. */
+  public take(): number | null {
+    const delay = this.pending;
+    if (delay !== null) {
+      this.pending = null;
+      this.sent = true;
+    }
+    return delay;
+  }
+
+  /** New session id */
+  public reset(): void {
+    this.pending = null;
+    this.sent = false;
   }
 }
