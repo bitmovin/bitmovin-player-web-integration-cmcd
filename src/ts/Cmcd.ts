@@ -179,7 +179,10 @@ export interface CmcdKeyInfo {
 }
 
 /** Keys of a CMCD version. Keys without an entry are not sent. */
-export type CmcdKeyTable = { [K in keyof CmcdData]?: CmcdKeyInfo };
+/** `cid` and `sid` need a maximum length in every version. */
+type CmcdIdKeyInfo = CmcdKeyInfo & { maxLength: number };
+
+export type CmcdKeyTable = { [K in keyof CmcdData]?: CmcdKeyInfo } & { cid: CmcdIdKeyInfo; sid: CmcdIdKeyInfo };
 
 export const CMCD_V1_KEYS: CmcdKeyTable = {
   br: { header: CmcdHeaderType.Object, type: 'integer', round: 1 },

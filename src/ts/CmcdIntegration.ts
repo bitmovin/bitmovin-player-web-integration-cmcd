@@ -38,6 +38,7 @@ import {
 } from './Cmcd';
 import { toRelativeUrl } from './Url';
 import { createWarnOnce } from './Log';
+import { CmcdTargetRegistry } from './CmcdTargetRegistry';
 
 export { CmcdCustomKey as CustomKey } from './Cmcd';
 export { CmcdHeaderType as HeaderType } from './Cmcd';
@@ -146,7 +147,10 @@ export class CmcdIntegration {
 
   // Session state for v2 keys, reset on a new session id
   /** State per origin, in order of last use */
-  private targets = new Map<string, CmcdTarget>();
+  private targets = new CmcdTargetRegistry<CmcdTarget>(
+    () => ({ sequenceNumber: 0, rebufferingDurations: [], errorCodes: [] }),
+    MAX_TARGETS
+  );
   /** `msd` to send with the next request */
   private pendingStartupDelay: number | null;
   private startupDelaySent: boolean;
@@ -419,7 +423,7 @@ export class CmcdIntegration {
   /** Adds the v2 keys that describe the player and session state. Only keys of the configured version are collected. */
   private addPlayerStateData(data: CmcdData, request: HttpRequest) {
     const player = this.player!;
-    const target = this.getTarget(request.url);
+    const target = this.targets.get(request.url);
 
     if (this.keys.sn) {
       data.sn = target.sequenceNumber++;
@@ -467,27 +471,6 @@ export class CmcdIntegration {
     }
   }
 
-  /** State of the report destination (origin) of the URL, marked as most recently used */
-  private getTarget(url: string): CmcdTarget {
-    let origin = '';
-    try {
-      origin = new URL(url).origin;
-    } catch {
-      // Shared by all invalid URLs
-    }
-    let target = this.targets.get(origin);
-    if (target) {
-      this.targets.delete(origin);
-    } else {
-      target = { sequenceNumber: 0, rebufferingDurations: [], errorCodes: [] };
-      if (this.targets.size >= MAX_TARGETS) {
-        this.targets.delete(this.targets.keys().next().value);
-      }
-    }
-    this.targets.set(origin, target);
-    return target;
-  }
-
   /** Play state as perceived by the user at request time */
   private getPlayState(): CmcdPlayStateToken {
     const player = this.player!;
@@ -518,7 +501,7 @@ export class CmcdIntegration {
     if (!value) {
       return false;
     }
-    const maxLength = this.keys[key]!.maxLength!;
+    const maxLength = this.keys[key].maxLength;
     if (value.length <= maxLength) {
       return true;
     }

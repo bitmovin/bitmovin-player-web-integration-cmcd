@@ -624,6 +624,20 @@ describe('CmcdIntegration v2', () => {
 
       expect(request.headers['CMCD-Request']).toContain('nor=("../300kbps/seg%203.m4s")');
     });
+
+    it('sends nor of a non-ASCII segment URL percent-encoded in query mode', async () => {
+      const segment = { url: `${base}/video/2000kbps/café.m4s`, duration: 4 };
+      videoSegments.splice(1, 0, segment);
+      try {
+        integration = create({ useQueryArgs: true });
+        const request = await send(HttpRequestType.MEDIA_VIDEO, videoSegments[0].url);
+
+        // The URL parser percent-encodes the path, so the value is ASCII and is not dropped.
+        expect(decodeURIComponent(request.url)).toContain('nor=("caf%C3%A9.m4s")');
+      } finally {
+        videoSegments.splice(1, 1);
+      }
+    });
   });
 
   it('sends a start-up sequence', async () => {
