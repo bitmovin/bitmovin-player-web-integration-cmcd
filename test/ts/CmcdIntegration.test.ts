@@ -59,7 +59,7 @@ describe('CmcdIntegration', () => {
         .mockReturnValue([{ bitrate: 500000 }, { bitrate: 800000 }, { bitrate: 1200000 }]),
       getAvailableSegments: jest.fn(),
       isStalled: jest.fn().mockReturnValue(false),
-      isPaused: jest.fn().mockReturnValue(false),
+      isPlaying: jest.fn().mockReturnValue(true),
       exports: {
         HttpRequestType: {
           MEDIA_AUDIO: 'media/audio',
@@ -473,18 +473,19 @@ describe('CmcdIntegration', () => {
       expect(sfMock.mock.calls).toEqual([[token]]);
     });
 
-    it('is "o" for media requests without a manifest request', async () => {
+    it('follows a new main manifest even if the previous source was never unloaded', async () => {
+      await send(HttpRequestType.MANIFEST_DASH);
+      await send(HttpRequestType.MANIFEST_HLS_MASTER);
       await send(HttpRequestType.MEDIA_VIDEO);
 
-      expect(sfMock.mock.calls).toEqual([['o']]);
+      expect(sfMock.mock.calls).toEqual([['d'], ['h'], ['h']]);
     });
 
-    it('is not overwritten by later manifest types of the same source', async () => {
-      await send(HttpRequestType.MANIFEST_HLS_MASTER);
-      await send(HttpRequestType.MANIFEST_HLS_VARIANT);
+    it('does not let an HLS variant request override a known format', async () => {
       await send(HttpRequestType.MANIFEST_DASH);
+      await send(HttpRequestType.MANIFEST_HLS_VARIANT);
 
-      expect(sfMock.mock.calls).toEqual([['h'], ['h'], ['h']]);
+      expect(sfMock.mock.calls).toEqual([['d'], ['d']]);
     });
   });
 
@@ -510,8 +511,8 @@ describe('CmcdIntegration', () => {
       expect(await sendAndGetRate()).toBe(2);
     });
 
-    it('is 0 while paused, regardless of the playback speed', async () => {
-      (mockPlayer.isPaused as jest.Mock).mockReturnValue(true);
+    it('is 0 while paused or before the first play, regardless of the playback speed', async () => {
+      (mockPlayer.isPlaying as jest.Mock).mockReturnValue(false);
       (mockPlayer.getPlaybackSpeed as jest.Mock).mockReturnValue(2);
 
       expect(await sendAndGetRate()).toBe(0);
@@ -586,7 +587,7 @@ describe('CmcdIntegration', () => {
       expect(keysAfter).not.toContain('bs');
       expect(startupMock).toHaveBeenCalledTimes(1);
       // `sf` of the old source is not reused
-      expect(sfMock.mock.calls).toEqual([['o']]);
+      expect(sfMock).not.toHaveBeenCalled();
     });
   });
 });

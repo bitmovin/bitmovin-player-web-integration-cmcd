@@ -238,8 +238,8 @@ export class CmcdIntegration {
     let data: CmcdBase[] = [];
     data.push(new CmcdVersion(CmcdVersionNumbers.v1));
     data.push(new CmcdStreamType(this.player.isLive() ? CmcdStreamTypeToken.Live : CmcdStreamTypeToken.Vod));
-    // `pr` is 0 if not playing
-    data.push(new CmcdPlaybackRate(this.player.isPaused() ? 0 : this.player.getPlaybackSpeed()));
+    // 0 before the first play and while paused
+    data.push(new CmcdPlaybackRate(this.player.isPlaying() ? this.player.getPlaybackSpeed() : 0));
     data.push(this.getObjectType(type));
 
     const streamingFormat = this.getStreamingType(type);
@@ -295,30 +295,23 @@ export class CmcdIntegration {
   }
 
   /**
-   * The format is derived from the main manifest request and kept for the source.
-   * Requests of other types (e.g. ad manifests, DRM) must not determine it.
-   * Returns `null` if the format is not known yet, as `sf` MUST NOT be sent then.
+   * Main manifest requests set the format, so loading another source before the previous one
+   * was unloaded is handled. An HLS variant request only sets it if still unknown (media playlist as source).
+   * Returns `null` while unknown, as `sf` MUST NOT be sent then.
    */
   private getStreamingType(type: HttpRequestType): CmcdStreamingFormat | null {
     const requestTypes = this.player?.exports.HttpRequestType;
-    if (!this.manifestType) {
-      if (type === requestTypes?.MANIFEST_DASH) {
-        this.manifestType = CmcdStreamingFormatToken.MpegDash;
-      } else if (type === requestTypes?.MANIFEST_HLS_MASTER || type === requestTypes?.MANIFEST_HLS_VARIANT) {
-        this.manifestType = CmcdStreamingFormatToken.Hls;
-      } else if (type === requestTypes?.MANIFEST_SMOOTH) {
-        this.manifestType = CmcdStreamingFormatToken.Smooth;
-      }
+    if (type === requestTypes?.MANIFEST_DASH) {
+      this.manifestType = CmcdStreamingFormatToken.MpegDash;
+    } else if (type === requestTypes?.MANIFEST_HLS_MASTER) {
+      this.manifestType = CmcdStreamingFormatToken.Hls;
+    } else if (type === requestTypes?.MANIFEST_SMOOTH) {
+      this.manifestType = CmcdStreamingFormatToken.Smooth;
+    } else if (type === requestTypes?.MANIFEST_HLS_VARIANT && !this.manifestType) {
+      this.manifestType = CmcdStreamingFormatToken.Hls;
     }
 
-    if (this.manifestType) {
-      return new CmcdStreamingFormat(this.manifestType);
-    }
-    // Media requests without a preceding manifest request (e.g. progressive playback)
-    if (type === requestTypes?.MEDIA_AUDIO || type === requestTypes?.MEDIA_VIDEO) {
-      return new CmcdStreamingFormat(CmcdStreamingFormatToken.Other);
-    }
-    return null;
+    return this.manifestType ? new CmcdStreamingFormat(this.manifestType) : null;
   }
 
   private getObjectType(type: HttpRequestType) {
