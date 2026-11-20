@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](http://keepachangelog.com/)
 and this project adheres to [Semantic Versioning](http://semver.org/).
 
 ## [Unreleased]
+
+## [0.6.1] - 2026-11-20
 ### Fixed
 - Measured throughput (`mtp`) was reported in kilobytes per second instead of kilobits per second, making the value 8x too low (and frequently rounding down to 0, so the key was omitted entirely). Throughput is now converted from bytes to bits before scaling to kbps.
 - Next object request (`nor`) contained the absolute URL of the next segment. It is now the path relative to the current request, URL encoded as required by the specification. `nor` is omitted if the next segment is on a different origin.
@@ -59,7 +61,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/).
 ### Added
 - Initial CMCD release (Beta)
 
-[Unreleased]: https://github.com/bitmovin/bitmovin-player-web-integration-cmcd/compare/v0.6.0...HEAD
+[Unreleased]: https://github.com/bitmovin/bitmovin-player-web-integration-cmcd/compare/v0.6.1...HEAD
+[0.6.1]: https://github.com/bitmovin/bitmovin-player-web-integration-cmcd/compare/v0.6.0...v0.6.1
 [0.6.0]: https://github.com/bitmovin/bitmovin-player-web-integration-cmcd/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/bitmovin/bitmovin-player-web-integration-cmcd/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/bitmovin/bitmovin-player-web-integration-cmcd/compare/v0.3.0...v0.4.0
