@@ -314,6 +314,12 @@ export class CmcdMeasuredThroughput extends CmcdBase {
   constructor(value: IntegerKbps) {
     super(Math.round(value / 100) * 100);
   }
+
+  // A throughput of 0 is not a valid measurement and MUST NOT be sent.
+  // See https://github.com/cta-wave/common-media-client-data/issues/100
+  override keyValuePairToString() {
+    return this.value === 0 ? `` : super.keyValuePairToString();
+  }
 }
 
 /**
@@ -329,8 +335,12 @@ export class CmcdNextObjectRequest extends CmcdBase {
   public readonly key = CmcdKeysToken.NextObjectRequest;
   public readonly type = CmcdHeaderType.Request;
 
-  constructor(value: string) {
-    super(value);
+  /**
+   * @param relativePath Unencoded path relative to the current request, e.g. `../300kbps/segment35.m4v`.
+   * It is URL encoded here, independent of the query argument encoding of the whole payload.
+   */
+  constructor(relativePath: string) {
+    super(encodeURIComponent(relativePath));
   }
 }
 
@@ -429,8 +439,12 @@ export class CmcdRequestedMaximumThroughput extends CmcdBase {
   public readonly key = CmcdKeysToken.RequestedMaximumThroughput;
   public readonly type = CmcdHeaderType.Status;
 
-  constructor(value: number) {
-    super(value);
+  constructor(value: IntegerKbps) {
+    super(Math.round(value / 100) * 100);
+  }
+
+  override keyValuePairToString() {
+    return this.value === 0 ? `` : super.keyValuePairToString();
   }
 }
 
