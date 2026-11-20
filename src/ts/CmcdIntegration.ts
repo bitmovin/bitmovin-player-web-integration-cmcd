@@ -149,6 +149,7 @@ export class CmcdIntegration {
 
   public setPlayer(player: PlayerAPI) {
     this.player = player;
+    this.player.on(player.exports.PlayerEvent.SourceUnloaded, () => this.resetSourceState());
     this.player.on(player.exports.PlayerEvent.StallStarted, () => {
       this.stalledSinceLastRequest = true;
       this.isSeekingOrTimeshiftingOrStartup = true;
@@ -160,6 +161,17 @@ export class CmcdIntegration {
     this.player.on(player.exports.PlayerEvent.Seeked, () => (this.isSeekingOrTimeshiftingOrStartup = false));
     this.player.on(player.exports.PlayerEvent.TimeShift, () => (this.isSeekingOrTimeshiftingOrStartup = true));
     this.player.on(player.exports.PlayerEvent.TimeShifted, () => (this.isSeekingOrTimeshiftingOrStartup = false));
+  }
+
+  /** Clears all state that belongs to the previously loaded source. */
+  private resetSourceState() {
+    this.stalledSinceLastRequest = false;
+    this.currentVideoQuality = null;
+    this.currentAudioQuality = null;
+    this.isSeekingOrTimeshiftingOrStartup = true;
+    this.lastMeasuredThroughputAudio = 0;
+    this.lastMeasuredThroughputVideo = 0;
+    this.manifestType = null;
   }
 
   public onVideoAdaptation = (data: VideoAdaptationData) => {
@@ -226,9 +238,14 @@ export class CmcdIntegration {
     let data: CmcdBase[] = [];
     data.push(new CmcdVersion(CmcdVersionNumbers.v1));
     data.push(new CmcdStreamType(this.player.isLive() ? CmcdStreamTypeToken.Live : CmcdStreamTypeToken.Vod));
-    data.push(new CmcdPlaybackRate(this.player.getPlaybackSpeed()));
+    // `pr` is 0 if not playing
+    data.push(new CmcdPlaybackRate(this.player.isPaused() ? 0 : this.player.getPlaybackSpeed()));
     data.push(this.getObjectType(type));
-    data.push(this.getStreamingType(type));
+
+    const streamingFormat = this.getStreamingType(type);
+    if (streamingFormat) {
+      data.push(streamingFormat);
+    }
 
     if (this.contentId) {
       data.push(new CmcdContentId(this.contentId));
@@ -277,19 +294,31 @@ export class CmcdIntegration {
     return [new CmcdRequestedMaximumThroughput(Number(encodedBitrate.value) * RTP_ENCODED_BITRATE_FACTOR)];
   }
 
-  private getStreamingType(type: HttpRequestType) {
+  /**
+   * The format is derived from the main manifest request and kept for the source.
+   * Requests of other types (e.g. ad manifests, DRM) must not determine it.
+   * Returns `null` if the format is not known yet, as `sf` MUST NOT be sent then.
+   */
+  private getStreamingType(type: HttpRequestType): CmcdStreamingFormat | null {
+    const requestTypes = this.player?.exports.HttpRequestType;
     if (!this.manifestType) {
-      if (type === this.player?.exports.HttpRequestType.MANIFEST_DASH) {
+      if (type === requestTypes?.MANIFEST_DASH) {
         this.manifestType = CmcdStreamingFormatToken.MpegDash;
-      } else if (type === this.player?.exports.HttpRequestType.MANIFEST_HLS_MASTER) {
+      } else if (type === requestTypes?.MANIFEST_HLS_MASTER || type === requestTypes?.MANIFEST_HLS_VARIANT) {
         this.manifestType = CmcdStreamingFormatToken.Hls;
-      } else if (type === this.player?.exports.HttpRequestType.MANIFEST_SMOOTH) {
+      } else if (type === requestTypes?.MANIFEST_SMOOTH) {
         this.manifestType = CmcdStreamingFormatToken.Smooth;
-      } else {
-        this.manifestType = CmcdStreamingFormatToken.Other;
       }
     }
-    return new CmcdStreamingFormat(this.manifestType);
+
+    if (this.manifestType) {
+      return new CmcdStreamingFormat(this.manifestType);
+    }
+    // Media requests without a preceding manifest request (e.g. progressive playback)
+    if (type === requestTypes?.MEDIA_AUDIO || type === requestTypes?.MEDIA_VIDEO) {
+      return new CmcdStreamingFormat(CmcdStreamingFormatToken.Other);
+    }
+    return null;
   }
 
   private getObjectType(type: HttpRequestType) {
