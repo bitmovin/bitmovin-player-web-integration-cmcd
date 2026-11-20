@@ -526,8 +526,8 @@ describe('CmcdIntegration', () => {
     const startupMock = CmcdStartup as unknown as jest.Mock;
     const segmentUrl = 'https://example.com/video/seg1.m4s';
 
-    const sendSegmentRequest = async () => {
-      await cmcdIntegration.preprocessHttpRequest(HttpRequestType.MEDIA_VIDEO, {
+    const sendSegmentRequest = async (type: HttpRequestType = HttpRequestType.MEDIA_VIDEO) => {
+      await cmcdIntegration.preprocessHttpRequest(type, {
         credentials: 'omit',
         method: HttpRequestMethod.GET,
         responseType: HttpResponseType.ARRAYBUFFER,
@@ -588,6 +588,26 @@ describe('CmcdIntegration', () => {
       expect(startupMock).toHaveBeenCalledTimes(1);
       // `sf` of the old source is not reused
       expect(sfMock).not.toHaveBeenCalled();
+    });
+
+    it('resets the audio state of the previous source when it is unloaded', async () => {
+      cmcdIntegration.onAudioAdaptation({
+        representations: [{ id: 'a1', bandwidth: 128_000 }],
+        suggested: 'a1',
+      } as unknown as Parameters<CmcdIntegration['onAudioAdaptation']>[0]);
+      await cmcdIntegration.preprocessHttpResponse(HttpRequestType.MEDIA_AUDIO, {
+        elapsedTime: 1,
+        length: 1_000_000,
+      } as unknown as Parameters<CmcdIntegration['preprocessHttpResponse']>[1]);
+
+      const keysBefore = await sendSegmentRequest(HttpRequestType.MEDIA_AUDIO);
+      expect(keysBefore).toEqual(expect.arrayContaining(['br', 'mtp']));
+
+      playerEventHandlers.sourceunloaded();
+
+      const keysAfter = await sendSegmentRequest(HttpRequestType.MEDIA_AUDIO);
+      expect(keysAfter).not.toContain('br');
+      expect(keysAfter).not.toContain('mtp');
     });
   });
 });

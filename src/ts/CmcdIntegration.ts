@@ -125,13 +125,7 @@ export class CmcdIntegration {
     this.sessionId = config.sessionId || '';
     this.contentId = config.contentId || '';
     this.customKeys = config.customKeys || [];
-    this.stalledSinceLastRequest = false;
-    this.currentVideoQuality = null;
-    this.currentAudioQuality = null;
-    this.isSeekingOrTimeshiftingOrStartup = true;
-    this.lastMeasuredThroughputAudio = 0;
-    this.lastMeasuredThroughputVideo = 0;
-    this.manifestType = null;
+    this.resetSourceState();
 
     if (this.useQueryArgs === false && this.customKeys.length > 0) {
       const customKeyWithoutHeaderType = this.customKeys
