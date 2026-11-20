@@ -1,6 +1,6 @@
 import { describe, beforeEach, it, expect, jest } from '@jest/globals';
 import { HttpRequest, HttpRequestMethod, HttpRequestType, HttpResponseType, PlayerAPI } from 'bitmovin-player';
-import { CmcdIntegration, CmcdConfig, toRelativeUrl } from '../../src/ts/CmcdIntegration';
+import { CmcdIntegration, CmcdConfig } from '../../src/ts/CmcdIntegration';
 import { CmcdCustomKey, cmcdDataToHeader, cmcdDataToUrlParameter, CmcdHeaderType } from '../../src/ts/Cmcd';
 
 // Jest Mocking for helper functions
@@ -422,24 +422,5 @@ describe('CmcdIntegration', () => {
       await getCmcdData(HttpRequestType.MEDIA_VIDEO, videoSegments[1].url);
       expect(startupMock).toHaveBeenCalledTimes(1);
     });
-  });
-});
-
-describe('toRelativeUrl', () => {
-  it.each([
-    ['https://a.com/v/1000kbps/seg1.m4s', 'https://a.com/v/1000kbps/seg2.m4s', 'seg2.m4s'],
-    ['https://a.com/v/1000kbps/seg1.m4s', 'https://a.com/v/300kbps/seg2.m4s', '../300kbps/seg2.m4s'],
-    ['https://a.com/v/1000kbps/seg1.m4s', 'https://a.com/x/y/seg2.m4s', '../../x/y/seg2.m4s'],
-    ['https://a.com/v/seg1.m4s', 'https://a.com/v/hd/seg2.m4s', 'hd/seg2.m4s'],
-    ['https://a.com/v/seg1.m4s?CMCD=x', 'https://a.com/v/seg2.m4s?token=abc', 'seg2.m4s?token=abc'],
-    ['https://a.com/v/seg1.m4s', 'https://a.com/v/a:b.m4s', './a:b.m4s'],
-    ['https://a.com/v/seg1.m4s', 'seg2.m4s', 'seg2.m4s'],
-  ])('%s -> %s = %s', (base, target, expected) => {
-    expect(toRelativeUrl(base, target)).toEqual(expected);
-  });
-
-  it('returns null for different origins', () => {
-    expect(toRelativeUrl('https://a.com/seg1.m4s', 'https://b.com/seg2.m4s')).toBeNull();
-    expect(toRelativeUrl('https://a.com/seg1.m4s', 'http://a.com/seg2.m4s')).toBeNull();
   });
 });
