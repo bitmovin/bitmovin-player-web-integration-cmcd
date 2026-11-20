@@ -125,13 +125,7 @@ export class CmcdIntegration {
     this.sessionId = config.sessionId || '';
     this.contentId = config.contentId || '';
     this.customKeys = config.customKeys || [];
-    this.stalledSinceLastRequest = false;
-    this.currentVideoQuality = null;
-    this.currentAudioQuality = null;
-    this.isSeekingOrTimeshiftingOrStartup = true;
-    this.lastMeasuredThroughputAudio = 0;
-    this.lastMeasuredThroughputVideo = 0;
-    this.manifestType = null;
+    this.resetSourceState();
 
     if (this.useQueryArgs === false && this.customKeys.length > 0) {
       const customKeyWithoutHeaderType = this.customKeys
@@ -149,6 +143,7 @@ export class CmcdIntegration {
 
   public setPlayer(player: PlayerAPI) {
     this.player = player;
+    this.player.on(player.exports.PlayerEvent.SourceUnloaded, () => this.resetSourceState());
     this.player.on(player.exports.PlayerEvent.StallStarted, () => {
       this.stalledSinceLastRequest = true;
       this.isSeekingOrTimeshiftingOrStartup = true;
@@ -160,6 +155,17 @@ export class CmcdIntegration {
     this.player.on(player.exports.PlayerEvent.Seeked, () => (this.isSeekingOrTimeshiftingOrStartup = false));
     this.player.on(player.exports.PlayerEvent.TimeShift, () => (this.isSeekingOrTimeshiftingOrStartup = true));
     this.player.on(player.exports.PlayerEvent.TimeShifted, () => (this.isSeekingOrTimeshiftingOrStartup = false));
+  }
+
+  /** Clears all state that belongs to the previously loaded source. */
+  private resetSourceState() {
+    this.stalledSinceLastRequest = false;
+    this.currentVideoQuality = null;
+    this.currentAudioQuality = null;
+    this.isSeekingOrTimeshiftingOrStartup = true;
+    this.lastMeasuredThroughputAudio = 0;
+    this.lastMeasuredThroughputVideo = 0;
+    this.manifestType = null;
   }
 
   public onVideoAdaptation = (data: VideoAdaptationData) => {
@@ -226,9 +232,14 @@ export class CmcdIntegration {
     let data: CmcdBase[] = [];
     data.push(new CmcdVersion(CmcdVersionNumbers.v1));
     data.push(new CmcdStreamType(this.player.isLive() ? CmcdStreamTypeToken.Live : CmcdStreamTypeToken.Vod));
-    data.push(new CmcdPlaybackRate(this.player.getPlaybackSpeed()));
+    // 0 before the first play and while paused
+    data.push(new CmcdPlaybackRate(this.player.isPlaying() ? this.player.getPlaybackSpeed() : 0));
     data.push(this.getObjectType(type));
-    data.push(this.getStreamingType(type));
+
+    const streamingFormat = this.getStreamingType(type);
+    if (streamingFormat) {
+      data.push(streamingFormat);
+    }
 
     if (this.contentId) {
       data.push(new CmcdContentId(this.contentId));
@@ -277,19 +288,24 @@ export class CmcdIntegration {
     return [new CmcdRequestedMaximumThroughput(Number(encodedBitrate.value) * RTP_ENCODED_BITRATE_FACTOR)];
   }
 
-  private getStreamingType(type: HttpRequestType) {
-    if (!this.manifestType) {
-      if (type === this.player?.exports.HttpRequestType.MANIFEST_DASH) {
-        this.manifestType = CmcdStreamingFormatToken.MpegDash;
-      } else if (type === this.player?.exports.HttpRequestType.MANIFEST_HLS_MASTER) {
-        this.manifestType = CmcdStreamingFormatToken.Hls;
-      } else if (type === this.player?.exports.HttpRequestType.MANIFEST_SMOOTH) {
-        this.manifestType = CmcdStreamingFormatToken.Smooth;
-      } else {
-        this.manifestType = CmcdStreamingFormatToken.Other;
-      }
+  /**
+   * Main manifest requests set the format, so loading another source before the previous one
+   * was unloaded is handled. An HLS variant request only sets it if still unknown (media playlist as source).
+   * Returns `null` while unknown, as `sf` MUST NOT be sent then.
+   */
+  private getStreamingType(type: HttpRequestType): CmcdStreamingFormat | null {
+    const requestTypes = this.player?.exports.HttpRequestType;
+    if (type === requestTypes?.MANIFEST_DASH) {
+      this.manifestType = CmcdStreamingFormatToken.MpegDash;
+    } else if (type === requestTypes?.MANIFEST_HLS_MASTER) {
+      this.manifestType = CmcdStreamingFormatToken.Hls;
+    } else if (type === requestTypes?.MANIFEST_SMOOTH) {
+      this.manifestType = CmcdStreamingFormatToken.Smooth;
+    } else if (type === requestTypes?.MANIFEST_HLS_VARIANT && !this.manifestType) {
+      this.manifestType = CmcdStreamingFormatToken.Hls;
     }
-    return new CmcdStreamingFormat(this.manifestType);
+
+    return this.manifestType ? new CmcdStreamingFormat(this.manifestType) : null;
   }
 
   private getObjectType(type: HttpRequestType) {

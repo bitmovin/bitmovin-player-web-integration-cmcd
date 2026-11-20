@@ -14,6 +14,10 @@ and this project adheres to [Semantic Versioning](http://semver.org/).
 - Startup (`su`) was sent on all requests until the first seek or stall. It is now cleared when playback starts.
 - Audio segment requests used the video segments to determine `nor` and object duration (`d`).
 - Object duration (`d`) was sent as `NaN` if the segment duration is unknown.
+- Streaming format (`sf`) was determined by the first request of any type, so e.g. an ads manifest or DRM request made `sf=o` stick for the whole session. It is now derived from the DASH, HLS master or Smooth manifest request (a new main manifest replaces the format of the previous source) and omitted while unknown. HLS variant playlists are recognized as HLS if no format is known yet.
+- Playback rate (`pr`) was sent as the playback speed while paused or before the first play. It is now `0` if the player is not playing, as required by the specification.
+- State of a previous source (streaming format, startup, buffer starvation, encoded bitrate and measured throughput) was reused after loading another source into the same player. It is now reset on `SourceUnloaded`.
+- package.json description referred to the wrong product.
 
 ## [0.6.0] - 2026-07-29
 ### Changed

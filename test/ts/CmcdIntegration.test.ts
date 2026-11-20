@@ -59,13 +59,20 @@ describe('CmcdIntegration', () => {
         .mockReturnValue([{ bitrate: 500000 }, { bitrate: 800000 }, { bitrate: 1200000 }]),
       getAvailableSegments: jest.fn(),
       isStalled: jest.fn().mockReturnValue(false),
+      isPlaying: jest.fn().mockReturnValue(true),
       exports: {
         HttpRequestType: {
           MEDIA_AUDIO: 'media/audio',
           MEDIA_VIDEO: 'media/video',
+          MANIFEST_DASH: 'manifest/dash',
           MANIFEST_HLS_MASTER: 'manifest/hls/master',
+          MANIFEST_HLS_VARIANT: 'manifest/hls/variant',
+          MANIFEST_SMOOTH: 'manifest/smooth',
+          MANIFEST_ADS: 'manifest/ads',
+          DRM_LICENSE_WIDEVINE: 'drm/license/widevine',
         },
         PlayerEvent: {
+          SourceUnloaded: 'sourceunloaded',
           StallStarted: 'stallstarted',
           StallEnded: 'stallended',
           Seek: 'seek',
@@ -421,6 +428,186 @@ describe('CmcdIntegration', () => {
       playerEventHandlers.playing();
       await getCmcdData(HttpRequestType.MEDIA_VIDEO, videoSegments[1].url);
       expect(startupMock).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  describe('streaming format (sf)', () => {
+    const { CmcdStreamingFormat } = jest.requireMock<typeof import('../../src/ts/Cmcd')>('../../src/ts/Cmcd');
+    const sfMock = CmcdStreamingFormat as unknown as jest.Mock;
+
+    const send = async (type: HttpRequestType) => {
+      await cmcdIntegration.preprocessHttpRequest(type, {
+        credentials: 'omit',
+        method: HttpRequestMethod.GET,
+        responseType: HttpResponseType.ARRAYBUFFER,
+        url: 'https://example.com/request',
+        headers: {},
+      });
+    };
+
+    beforeEach(() => sfMock.mockClear());
+
+    it('is not sent until the format is known', async () => {
+      await send(HttpRequestType.DRM_LICENSE_WIDEVINE);
+      await send(HttpRequestType.MANIFEST_ADS);
+
+      expect(sfMock).not.toHaveBeenCalled();
+    });
+
+    it('is not determined by a non-manifest request that precedes the manifest', async () => {
+      await send(HttpRequestType.MANIFEST_ADS);
+      await send(HttpRequestType.MANIFEST_DASH);
+      await send(HttpRequestType.MEDIA_VIDEO);
+
+      expect(sfMock.mock.calls).toEqual([['d'], ['d']]);
+    });
+
+    it.each([
+      [HttpRequestType.MANIFEST_DASH, 'd'],
+      [HttpRequestType.MANIFEST_HLS_MASTER, 'h'],
+      [HttpRequestType.MANIFEST_HLS_VARIANT, 'h'],
+      [HttpRequestType.MANIFEST_SMOOTH, 's'],
+    ])('is derived from %s', async (type, token) => {
+      await send(type);
+
+      expect(sfMock.mock.calls).toEqual([[token]]);
+    });
+
+    it('follows a new main manifest even if the previous source was never unloaded', async () => {
+      await send(HttpRequestType.MANIFEST_DASH);
+      await send(HttpRequestType.MANIFEST_HLS_MASTER);
+      await send(HttpRequestType.MEDIA_VIDEO);
+
+      expect(sfMock.mock.calls).toEqual([['d'], ['h'], ['h']]);
+    });
+
+    it('does not let an HLS variant request override a known format', async () => {
+      await send(HttpRequestType.MANIFEST_DASH);
+      await send(HttpRequestType.MANIFEST_HLS_VARIANT);
+
+      expect(sfMock.mock.calls).toEqual([['d'], ['d']]);
+    });
+  });
+
+  describe('playback rate (pr)', () => {
+    const { CmcdPlaybackRate } = jest.requireMock<typeof import('../../src/ts/Cmcd')>('../../src/ts/Cmcd');
+    const prMock = CmcdPlaybackRate as unknown as jest.Mock;
+
+    const sendAndGetRate = async () => {
+      prMock.mockClear();
+      await cmcdIntegration.preprocessHttpRequest(HttpRequestType.MEDIA_VIDEO, {
+        credentials: 'omit',
+        method: HttpRequestMethod.GET,
+        responseType: HttpResponseType.ARRAYBUFFER,
+        url: 'https://example.com/segment.m4s',
+        headers: {},
+      });
+      return prMock.mock.calls[0][0];
+    };
+
+    it('is the playback speed while playing', async () => {
+      (mockPlayer.getPlaybackSpeed as jest.Mock).mockReturnValue(2);
+
+      expect(await sendAndGetRate()).toBe(2);
+    });
+
+    it('is 0 while paused or before the first play, regardless of the playback speed', async () => {
+      (mockPlayer.isPlaying as jest.Mock).mockReturnValue(false);
+      (mockPlayer.getPlaybackSpeed as jest.Mock).mockReturnValue(2);
+
+      expect(await sendAndGetRate()).toBe(0);
+    });
+  });
+
+  describe('source change', () => {
+    const { CmcdStreamingFormat, CmcdStartup } =
+      jest.requireMock<typeof import('../../src/ts/Cmcd')>('../../src/ts/Cmcd');
+    const sfMock = CmcdStreamingFormat as unknown as jest.Mock;
+    const startupMock = CmcdStartup as unknown as jest.Mock;
+    const segmentUrl = 'https://example.com/video/seg1.m4s';
+
+    const sendSegmentRequest = async (type: HttpRequestType = HttpRequestType.MEDIA_VIDEO) => {
+      await cmcdIntegration.preprocessHttpRequest(type, {
+        credentials: 'omit',
+        method: HttpRequestMethod.GET,
+        responseType: HttpResponseType.ARRAYBUFFER,
+        url: segmentUrl,
+        headers: {},
+      });
+      const data = (cmcdDataToUrlParameter as jest.Mock).mock.calls.at(-1)?.[0] as { key: string }[];
+      return data.map((entry) => entry.key).filter(Boolean);
+    };
+
+    beforeEach(() => {
+      sfMock.mockClear();
+      startupMock.mockClear();
+      (mockPlayer.getAvailableSegments as jest.Mock).mockReturnValue({
+        'video/mp4': {
+          v1: [
+            { url: segmentUrl, duration: 4 },
+            { url: 'https://example.com/video/seg2.m4s', duration: 4 },
+          ],
+        },
+      });
+      (cmcdDataToUrlParameter as jest.Mock).mockReturnValue('CMCD=mockData');
+    });
+
+    it('resets the state of the previous source when it is unloaded', async () => {
+      await cmcdIntegration.preprocessHttpRequest(HttpRequestType.MANIFEST_DASH, {
+        credentials: 'omit',
+        method: HttpRequestMethod.GET,
+        responseType: HttpResponseType.ARRAYBUFFER,
+        url: 'https://example.com/manifest.mpd',
+        headers: {},
+      });
+      cmcdIntegration.onVideoAdaptation({
+        representations: [{ id: 'v1', bandwidth: 2_000_000 }],
+        suggested: 'v1',
+      } as unknown as Parameters<CmcdIntegration['onVideoAdaptation']>[0]);
+      await cmcdIntegration.preprocessHttpResponse(HttpRequestType.MEDIA_VIDEO, {
+        elapsedTime: 1,
+        length: 1_000_000,
+      } as unknown as Parameters<CmcdIntegration['preprocessHttpResponse']>[1]);
+      playerEventHandlers.playing();
+      startupMock.mockClear();
+
+      const keysBefore = await sendSegmentRequest();
+      expect(keysBefore).toEqual(expect.arrayContaining(['br', 'mtp', 'rtp', 'nor']));
+      expect(startupMock).not.toHaveBeenCalled();
+
+      playerEventHandlers.stallstarted();
+      playerEventHandlers.playing();
+      playerEventHandlers.sourceunloaded();
+      sfMock.mockClear();
+
+      const keysAfter = await sendSegmentRequest();
+
+      expect(keysAfter).not.toContain('br');
+      expect(keysAfter).not.toContain('mtp');
+      expect(keysAfter).not.toContain('bs');
+      expect(startupMock).toHaveBeenCalledTimes(1);
+      // `sf` of the old source is not reused
+      expect(sfMock).not.toHaveBeenCalled();
+    });
+
+    it('resets the audio state of the previous source when it is unloaded', async () => {
+      cmcdIntegration.onAudioAdaptation({
+        representations: [{ id: 'a1', bandwidth: 128_000 }],
+        suggested: 'a1',
+      } as unknown as Parameters<CmcdIntegration['onAudioAdaptation']>[0]);
+      await cmcdIntegration.preprocessHttpResponse(HttpRequestType.MEDIA_AUDIO, {
+        elapsedTime: 1,
+        length: 1_000_000,
+      } as unknown as Parameters<CmcdIntegration['preprocessHttpResponse']>[1]);
+
+      const keysBefore = await sendSegmentRequest(HttpRequestType.MEDIA_AUDIO);
+      expect(keysBefore).toEqual(expect.arrayContaining(['br', 'mtp']));
+
+      playerEventHandlers.sourceunloaded();
+
+      const keysAfter = await sendSegmentRequest(HttpRequestType.MEDIA_AUDIO);
+      expect(keysAfter).not.toContain('br');
+      expect(keysAfter).not.toContain('mtp');
     });
   });
 });
