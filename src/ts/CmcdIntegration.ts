@@ -20,32 +20,14 @@ import {
   VideoAdaptationData,
 } from 'bitmovin-player';
 import {
-  CmcdBase,
-  CmcdBufferLength,
-  CmcdBufferStarvation,
-  CmcdContentId,
   CmcdCustomKey,
+  CmcdData,
   cmcdDataToHeader,
   cmcdDataToUrlParameter,
-  CmcdDeadline,
-  CmcdEncodedBitrate,
   CmcdKeysToken,
-  CmcdMeasuredThroughput,
-  CmcdNextObjectRequest,
-  CmcdNextRangeRequest,
-  CmcdObjectDuration,
-  CmcdObjectType,
   CmcdObjectTypeToken,
-  CmcdPlaybackRate,
-  CmcdRequestedMaximumThroughput,
-  CmcdSessionId,
-  CmcdStartup,
-  CmcdStreamingFormat,
   CmcdStreamingFormatToken,
-  CmcdStreamType,
   CmcdStreamTypeToken,
-  CmcdTopBitrate,
-  CmcdVersion,
   CmcdVersionNumbers,
 } from './Cmcd';
 import { toRelativeUrl } from './Url';
@@ -186,9 +168,9 @@ export class CmcdIntegration {
     const data = this.gatherCmcdData(type, request);
 
     if (this.useQueryArgs) {
-      request.url = appendCmcdQueryArg(request.url, cmcdDataToUrlParameter(data));
+      request.url = appendCmcdQueryArg(request.url, cmcdDataToUrlParameter(data, this.customKeys));
     } else {
-      const cmcdHeaders = cmcdDataToHeader(data);
+      const cmcdHeaders = cmcdDataToHeader(data, this.customKeys);
 
       request.headers = {
         ...request.headers,
@@ -228,58 +210,55 @@ export class CmcdIntegration {
     this.contentId = id;
   }
 
-  private gatherCmcdData(type: HttpRequestType, request: HttpRequest): CmcdBase[] {
+  private gatherCmcdData(type: HttpRequestType, request: HttpRequest): CmcdData {
     if (!this.player) {
       throw new Error('Bitmovin Player not provided!');
     }
 
-    let data: CmcdBase[] = [];
-    data.push(new CmcdVersion(CmcdVersionNumbers.v1));
-    data.push(new CmcdStreamType(this.player.isLive() ? CmcdStreamTypeToken.Live : CmcdStreamTypeToken.Vod));
-    // 0 before the first play and while paused
-    data.push(new CmcdPlaybackRate(this.player.isPlaying() ? this.player.getPlaybackSpeed() : 0));
-    data.push(this.getObjectType(type));
+    const data: CmcdData = {
+      v: CmcdVersionNumbers.v1,
+      st: this.player.isLive() ? CmcdStreamTypeToken.Live : CmcdStreamTypeToken.Vod,
+      // 0 before the first play and while paused
+      pr: this.player.isPlaying() ? this.player.getPlaybackSpeed() : 0,
+      ot: this.getObjectType(type),
+    };
 
     const streamingFormat = this.getStreamingType(type);
     if (streamingFormat) {
-      data.push(streamingFormat);
+      data.sf = streamingFormat;
     }
 
     if (this.isValidId(CmcdKeysToken.ContentId, this.contentId)) {
-      data.push(new CmcdContentId(this.contentId));
+      data.cid = this.contentId;
     }
 
     if (this.isValidId(CmcdKeysToken.SessionId, this.sessionId)) {
-      data.push(new CmcdSessionId(this.sessionId));
+      data.sid = this.sessionId;
     }
 
     const isStartup = this.isSeekingOrTimeshiftingOrStartup;
     if (isStartup) {
-      data.push(new CmcdStartup(true));
+      data.su = true;
     }
 
     const isBufferStarvation = this.stalledSinceLastRequest || this.player.isStalled();
     if (isBufferStarvation) {
-      data.push(new CmcdBufferStarvation(true));
+      data.bs = true;
       this.stalledSinceLastRequest = false;
     }
 
     if (type === this.player.exports.HttpRequestType.MEDIA_AUDIO) {
-      data = data.concat(this.getSegmentRequestSpecificData(request, 'audio'));
+      this.addSegmentRequestSpecificData(data, request, 'audio');
     } else if (type === this.player.exports.HttpRequestType.MEDIA_VIDEO) {
-      data = data.concat(this.getSegmentRequestSpecificData(request, 'video'));
+      this.addSegmentRequestSpecificData(data, request, 'video');
     }
 
     // The object is needed as fast as possible during startup and after a stall, so no throughput cap is requested.
-    if (!isStartup && !isBufferStarvation) {
-      data = data.concat(this.getRequestedMaximumThroughput(data));
+    if (!isStartup && !isBufferStarvation && data.br !== undefined) {
+      data.rtp = data.br * RTP_ENCODED_BITRATE_FACTOR;
     }
 
-    // TODO: data.push(new CmcdNextRangeRequest('byte-range'));
-
-    for (const customKey of this.customKeys) {
-      data.push(customKey);
-    }
+    // TODO: data.nrr = 'byte-range';
 
     return data;
   }
@@ -299,20 +278,12 @@ export class CmcdIntegration {
     return false;
   }
 
-  private getRequestedMaximumThroughput(data: CmcdBase[]): CmcdBase[] {
-    const encodedBitrate = data.find((obj) => obj.key === CmcdKeysToken.EncodedBitrate);
-    if (!encodedBitrate) {
-      return [];
-    }
-    return [new CmcdRequestedMaximumThroughput(Number(encodedBitrate.value) * RTP_ENCODED_BITRATE_FACTOR)];
-  }
-
   /**
    * Main manifest requests set the format, so loading another source before the previous one
    * was unloaded is handled. An HLS variant request only sets it if still unknown (media playlist as source).
    * Returns `null` while unknown, as `sf` MUST NOT be sent then.
    */
-  private getStreamingType(type: HttpRequestType): CmcdStreamingFormat | null {
+  private getStreamingType(type: HttpRequestType): CmcdStreamingFormatToken | null {
     const requestTypes = this.player?.exports.HttpRequestType;
     if (type === requestTypes?.MANIFEST_DASH) {
       this.manifestType = CmcdStreamingFormatToken.MpegDash;
@@ -324,55 +295,43 @@ export class CmcdIntegration {
       this.manifestType = CmcdStreamingFormatToken.Hls;
     }
 
-    return this.manifestType ? new CmcdStreamingFormat(this.manifestType) : null;
+    return this.manifestType;
   }
 
-  private getObjectType(type: HttpRequestType) {
-    let data;
-
+  private getObjectType(type: HttpRequestType): CmcdObjectTypeToken {
     switch (type) {
       case this.player?.exports.HttpRequestType.MEDIA_AUDIO:
         // TODO: We can't distinguish between media and init segments
-        data = new CmcdObjectType(CmcdObjectTypeToken.AudioOnly);
-        break;
+        return CmcdObjectTypeToken.AudioOnly;
       case this.player?.exports.HttpRequestType.MEDIA_VIDEO:
         // TODO: We can't distinguish between Video and muxed Audio/Video
         // TODO: We can't distinguish between media and init segments
-        data = new CmcdObjectType(CmcdObjectTypeToken.VideoOnly);
-        break;
+        return CmcdObjectTypeToken.VideoOnly;
       case this.player?.exports.HttpRequestType.DRM_CERTIFICATE_FAIRPLAY:
       case this.player?.exports.HttpRequestType.DRM_LICENSE_CLEARKEY:
       case this.player?.exports.HttpRequestType.DRM_LICENSE_FAIRPLAY:
       case this.player?.exports.HttpRequestType.DRM_LICENSE_PLAYREADY:
       case this.player?.exports.HttpRequestType.DRM_LICENSE_WIDEVINE:
       case this.player?.exports.HttpRequestType.KEY_HLS_AES:
-        data = new CmcdObjectType(CmcdObjectTypeToken.CryptographicKeyOrLicenseOrCertificate);
-        break;
+        return CmcdObjectTypeToken.CryptographicKeyOrLicenseOrCertificate;
       case this.player?.exports.HttpRequestType.MANIFEST_ADS:
       case this.player?.exports.HttpRequestType.MANIFEST_DASH:
       case this.player?.exports.HttpRequestType.MANIFEST_HLS_MASTER:
       case this.player?.exports.HttpRequestType.MANIFEST_HLS_VARIANT:
       case this.player?.exports.HttpRequestType.MANIFEST_SMOOTH:
-        data = new CmcdObjectType(CmcdObjectTypeToken.ManifestOrPlaylistTextFile);
-        break;
+        return CmcdObjectTypeToken.ManifestOrPlaylistTextFile;
       case this.player?.exports.HttpRequestType.MEDIA_SEGMENTINDEX:
-        data = new CmcdObjectType(CmcdObjectTypeToken.InitSegment);
-        break;
+        return CmcdObjectTypeToken.InitSegment;
       case this.player?.exports.HttpRequestType.MEDIA_SUBTITLES:
-        data = new CmcdObjectType(CmcdObjectTypeToken.CaptionOrSubtitle);
-        break;
+        return CmcdObjectTypeToken.CaptionOrSubtitle;
       default:
-        data = new CmcdObjectType(CmcdObjectTypeToken.Other);
-        break;
+        return CmcdObjectTypeToken.Other;
     }
-
-    return data;
   }
 
-  private getSegmentRequestSpecificData(request: HttpRequest, mediaType: 'audio' | 'video'): CmcdBase[] {
-    let data: CmcdBase[] = [];
+  private addSegmentRequestSpecificData(data: CmcdData, request: HttpRequest, mediaType: 'audio' | 'video') {
     if (!this.player) {
-      return data;
+      return;
     }
 
     const isAudio = mediaType === 'audio';
@@ -380,11 +339,11 @@ export class CmcdIntegration {
     const lastMeasuredThroughput = isAudio ? this.lastMeasuredThroughputAudio : this.lastMeasuredThroughputVideo;
 
     if (currentQuality && currentQuality.bandwidth) {
-      data.push(new CmcdEncodedBitrate(Math.round(currentQuality.bandwidth / 1000)));
+      data.br = Math.round(currentQuality.bandwidth / 1000);
     }
 
     if (lastMeasuredThroughput) {
-      data.push(new CmcdMeasuredThroughput(lastMeasuredThroughput));
+      data.mtp = lastMeasuredThroughput;
     }
 
     const buffer = this.player.buffer.getLevel(
@@ -392,16 +351,14 @@ export class CmcdIntegration {
       isAudio ? this.player.exports.MediaType.Audio : this.player.exports.MediaType.Video
     );
     if (buffer.targetLevel > 0) {
-      data.push(new CmcdBufferLength(buffer.level * 1000));
-
-      const deadline = buffer.level / this.player.getPlaybackSpeed();
-      data.push(new CmcdDeadline(deadline * 1000));
+      data.bl = buffer.level * 1000;
+      data.dl = (buffer.level / this.player.getPlaybackSpeed()) * 1000;
     }
 
     const qualities = isAudio ? this.player.getAvailableAudioQualities() : this.player.getAvailableVideoQualities();
     const topBitrate = qualities.reduce((prev, current) => Math.max(prev, current.bitrate), 0) / 1000;
     if (topBitrate > 0) {
-      data.push(new CmcdTopBitrate(topBitrate));
+      data.tb = topBitrate;
     }
 
     if (currentQuality) {
@@ -410,25 +367,21 @@ export class CmcdIntegration {
         for (const mimeType in allSegments) {
           const segments = allSegments[mimeType][currentQuality.id];
           if (mimeType.startsWith(`${mediaType}/`) && segments) {
-            data = data.concat(this.getNextObjectAndObjectDurationCmcdData(segments, request.url));
+            this.addNextObjectAndObjectDuration(data, segments, request.url);
           }
         }
       } catch (error) {
         console.error(`Error processing ${mediaType} segments:`, error);
       }
     }
-
-    return data;
   }
 
-  private getNextObjectAndObjectDurationCmcdData(segments: SegmentInfo[], requestUrl: string): CmcdBase[] {
-    const data: CmcdBase[] = [];
-
+  private addNextObjectAndObjectDuration(data: CmcdData, segments: SegmentInfo[], requestUrl: string) {
     const currentSegmentIndex = segments.findIndex((value) => value.url === requestUrl);
     if (currentSegmentIndex > -1) {
       const currentSegment = segments[currentSegmentIndex];
       if (Number.isFinite(currentSegment.duration)) {
-        data.push(new CmcdObjectDuration(Number(currentSegment.duration) * 1000));
+        data.d = Number(currentSegment.duration) * 1000;
       }
 
       if (currentSegmentIndex + 1 < segments.length) {
@@ -436,10 +389,9 @@ export class CmcdIntegration {
         // TODO what about range requests?
         const relativePath = nextSegment.url ? toRelativeUrl(requestUrl, nextSegment.url) : null;
         if (relativePath) {
-          data.push(new CmcdNextObjectRequest(relativePath));
+          data.nor = relativePath;
         }
       }
     }
-    return data;
   }
 }

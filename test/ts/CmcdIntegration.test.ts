@@ -1,29 +1,22 @@
 import { describe, beforeEach, afterEach, it, expect, jest } from '@jest/globals';
 import { HttpRequest, HttpRequestMethod, HttpRequestType, HttpResponseType, PlayerAPI } from 'bitmovin-player';
 import { CmcdIntegration, CmcdConfig } from '../../src/ts/CmcdIntegration';
-import { CmcdCustomKey, cmcdDataToHeader, cmcdDataToUrlParameter, CmcdHeaderType } from '../../src/ts/Cmcd';
+import { CmcdCustomKey, CmcdData, cmcdDataToHeader, cmcdDataToUrlParameter, CmcdHeaderType } from '../../src/ts/Cmcd';
 
 // Jest Mocking for helper functions
 jest.mock('../../src/ts/Cmcd', () => {
   const actual = jest.requireActual<typeof import('../../src/ts/Cmcd')>('../../src/ts/Cmcd');
   return {
     ...actual,
-    CmcdVersion: jest.fn(),
-    CmcdStreamType: jest.fn(),
-    CmcdPlaybackRate: jest.fn(),
-    CmcdObjectType: jest.fn(),
-    CmcdStreamingFormat: jest.fn(),
-    CmcdStartup: jest.fn(),
-    CmcdBufferStarvation: jest.fn(),
-    CmcdBufferLength: jest.fn(),
-    CmcdContentId: jest.fn(),
-    CmcdSessionId: jest.fn(),
-    CmcdDeadline: jest.fn(),
-    CmcdTopBitrate: jest.fn(),
     cmcdDataToHeader: jest.fn(),
     cmcdDataToUrlParameter: jest.fn(),
   };
 });
+
+const actualCmcd = jest.requireActual<typeof import('../../src/ts/Cmcd')>('../../src/ts/Cmcd');
+
+/** CMCD data passed to the encoder by the last request in query mode. */
+const lastCmcdData = () => (cmcdDataToUrlParameter as jest.Mock).mock.calls.at(-1)?.[0] as CmcdData;
 
 describe('CmcdIntegration', () => {
   let cmcdIntegration: CmcdIntegration;
@@ -246,6 +239,24 @@ describe('CmcdIntegration', () => {
       expect(processedRequest.headers).toEqual({ 'CMCD-Header': 'mockData' });
       expect(cmcdDataToHeader).toHaveBeenCalled();
     });
+
+    it.each([true, false])('should pass the custom keys to the encoder (useQueryArgs: %s)', async (useQueryArgs) => {
+      const customKeys = [new CmcdCustomKey('com.example-myCustomKey', 'value', CmcdHeaderType.Request)];
+      cmcdIntegration = new CmcdIntegration({ ...config, useQueryArgs, customKeys });
+      cmcdIntegration.setPlayer(mockPlayer);
+      const encoder = (useQueryArgs ? cmcdDataToUrlParameter : cmcdDataToHeader) as jest.Mock;
+      encoder.mockClear();
+
+      await cmcdIntegration.preprocessHttpRequest(HttpRequestType.MEDIA_VIDEO, {
+        credentials: 'omit',
+        method: HttpRequestMethod.GET,
+        responseType: HttpResponseType.ARRAYBUFFER,
+        url: 'https://example.com/segment.m4s',
+        headers: {},
+      });
+
+      expect(encoder).toHaveBeenCalledWith(expect.any(Object), customKeys);
+    });
   });
 
   describe('preprocessHttpResponse', () => {
@@ -270,8 +281,7 @@ describe('CmcdIntegration', () => {
       };
       (cmcdDataToUrlParameter as jest.Mock).mockReturnValue('CMCD=mockData');
       await cmcdIntegration.preprocessHttpRequest(type, request);
-      const data = (cmcdDataToUrlParameter as jest.Mock).mock.calls.at(-1)?.[0] as { key: string; value: unknown }[];
-      return data.find((entry) => entry.key === 'mtp')?.value;
+      return lastCmcdData().mtp;
     };
 
     it('measures throughput in kilobits per second (bytes are converted to bits)', async () => {
@@ -318,13 +328,13 @@ describe('CmcdIntegration', () => {
       };
       (cmcdDataToUrlParameter as jest.Mock).mockReturnValue('CMCD=mockData');
       await cmcdIntegration.preprocessHttpRequest(type, request);
-      const data = (cmcdDataToUrlParameter as jest.Mock).mock.calls.at(-1)?.[0] as {
-        key: string;
-        value: unknown;
-        keyValuePairToString(): string;
-      }[];
+      // Encoded key-value pair per key, e.g. `{ d: 'd=4000' }`
+      const data = lastCmcdData();
       return Object.fromEntries(
-        data.filter((entry) => entry.key).map((entry) => [entry.key, entry.keyValuePairToString()])
+        (Object.keys(data) as (keyof CmcdData)[]).map((key) => [
+          key,
+          Object.values(actualCmcd.cmcdDataToHeader({ [key]: data[key] })).join(),
+        ])
       );
     };
 
@@ -418,48 +428,41 @@ describe('CmcdIntegration', () => {
     });
 
     it('stops sending su once playback started', async () => {
-      const { CmcdStartup } = jest.requireMock<typeof import('../../src/ts/Cmcd')>('../../src/ts/Cmcd');
-      const startupMock = CmcdStartup as unknown as jest.Mock;
-      startupMock.mockClear();
-
-      await getCmcdData(HttpRequestType.MEDIA_VIDEO, videoSegments[0].url);
-      expect(startupMock).toHaveBeenCalledTimes(1);
+      expect((await getCmcdData(HttpRequestType.MEDIA_VIDEO, videoSegments[0].url)).su).toEqual('su');
 
       playerEventHandlers.playing();
-      await getCmcdData(HttpRequestType.MEDIA_VIDEO, videoSegments[1].url);
-      expect(startupMock).toHaveBeenCalledTimes(1);
+      expect((await getCmcdData(HttpRequestType.MEDIA_VIDEO, videoSegments[1].url)).su).toBeUndefined();
     });
   });
 
   describe('streaming format (sf)', () => {
-    const { CmcdStreamingFormat } = jest.requireMock<typeof import('../../src/ts/Cmcd')>('../../src/ts/Cmcd');
-    const sfMock = CmcdStreamingFormat as unknown as jest.Mock;
-
-    const send = async (type: HttpRequestType) => {
-      await cmcdIntegration.preprocessHttpRequest(type, {
-        credentials: 'omit',
-        method: HttpRequestMethod.GET,
-        responseType: HttpResponseType.ARRAYBUFFER,
-        url: 'https://example.com/request',
-        headers: {},
-      });
+    /** Sends the requests and returns `sf` of each. */
+    const send = async (...types: HttpRequestType[]) => {
+      const formats = [];
+      for (const type of types) {
+        await cmcdIntegration.preprocessHttpRequest(type, {
+          credentials: 'omit',
+          method: HttpRequestMethod.GET,
+          responseType: HttpResponseType.ARRAYBUFFER,
+          url: 'https://example.com/request',
+          headers: {},
+        });
+        formats.push(lastCmcdData().sf);
+      }
+      return formats;
     };
 
-    beforeEach(() => sfMock.mockClear());
-
     it('is not sent until the format is known', async () => {
-      await send(HttpRequestType.DRM_LICENSE_WIDEVINE);
-      await send(HttpRequestType.MANIFEST_ADS);
-
-      expect(sfMock).not.toHaveBeenCalled();
+      expect(await send(HttpRequestType.DRM_LICENSE_WIDEVINE, HttpRequestType.MANIFEST_ADS)).toEqual([
+        undefined,
+        undefined,
+      ]);
     });
 
     it('is not determined by a non-manifest request that precedes the manifest', async () => {
-      await send(HttpRequestType.MANIFEST_ADS);
-      await send(HttpRequestType.MANIFEST_DASH);
-      await send(HttpRequestType.MEDIA_VIDEO);
-
-      expect(sfMock.mock.calls).toEqual([['d'], ['d']]);
+      expect(
+        await send(HttpRequestType.MANIFEST_ADS, HttpRequestType.MANIFEST_DASH, HttpRequestType.MEDIA_VIDEO)
+      ).toEqual([undefined, 'd', 'd']);
     });
 
     it.each([
@@ -468,33 +471,22 @@ describe('CmcdIntegration', () => {
       [HttpRequestType.MANIFEST_HLS_VARIANT, 'h'],
       [HttpRequestType.MANIFEST_SMOOTH, 's'],
     ])('is derived from %s', async (type, token) => {
-      await send(type);
-
-      expect(sfMock.mock.calls).toEqual([[token]]);
+      expect(await send(type)).toEqual([token]);
     });
 
     it('follows a new main manifest even if the previous source was never unloaded', async () => {
-      await send(HttpRequestType.MANIFEST_DASH);
-      await send(HttpRequestType.MANIFEST_HLS_MASTER);
-      await send(HttpRequestType.MEDIA_VIDEO);
-
-      expect(sfMock.mock.calls).toEqual([['d'], ['h'], ['h']]);
+      expect(
+        await send(HttpRequestType.MANIFEST_DASH, HttpRequestType.MANIFEST_HLS_MASTER, HttpRequestType.MEDIA_VIDEO)
+      ).toEqual(['d', 'h', 'h']);
     });
 
     it('does not let an HLS variant request override a known format', async () => {
-      await send(HttpRequestType.MANIFEST_DASH);
-      await send(HttpRequestType.MANIFEST_HLS_VARIANT);
-
-      expect(sfMock.mock.calls).toEqual([['d'], ['d']]);
+      expect(await send(HttpRequestType.MANIFEST_DASH, HttpRequestType.MANIFEST_HLS_VARIANT)).toEqual(['d', 'd']);
     });
   });
 
   describe('playback rate (pr)', () => {
-    const { CmcdPlaybackRate } = jest.requireMock<typeof import('../../src/ts/Cmcd')>('../../src/ts/Cmcd');
-    const prMock = CmcdPlaybackRate as unknown as jest.Mock;
-
     const sendAndGetRate = async () => {
-      prMock.mockClear();
       await cmcdIntegration.preprocessHttpRequest(HttpRequestType.MEDIA_VIDEO, {
         credentials: 'omit',
         method: HttpRequestMethod.GET,
@@ -502,7 +494,7 @@ describe('CmcdIntegration', () => {
         url: 'https://example.com/segment.m4s',
         headers: {},
       });
-      return prMock.mock.calls[0][0];
+      return lastCmcdData().pr;
     };
 
     it('is the playback speed while playing', async () => {
@@ -520,10 +512,6 @@ describe('CmcdIntegration', () => {
   });
 
   describe('source change', () => {
-    const { CmcdStreamingFormat, CmcdStartup } =
-      jest.requireMock<typeof import('../../src/ts/Cmcd')>('../../src/ts/Cmcd');
-    const sfMock = CmcdStreamingFormat as unknown as jest.Mock;
-    const startupMock = CmcdStartup as unknown as jest.Mock;
     const segmentUrl = 'https://example.com/video/seg1.m4s';
 
     const sendSegmentRequest = async (type: HttpRequestType = HttpRequestType.MEDIA_VIDEO) => {
@@ -534,13 +522,11 @@ describe('CmcdIntegration', () => {
         url: segmentUrl,
         headers: {},
       });
-      const data = (cmcdDataToUrlParameter as jest.Mock).mock.calls.at(-1)?.[0] as { key: string }[];
-      return data.map((entry) => entry.key).filter(Boolean);
+      const data = lastCmcdData();
+      return (Object.keys(data) as (keyof CmcdData)[]).filter((key) => data[key] !== undefined);
     };
 
     beforeEach(() => {
-      sfMock.mockClear();
-      startupMock.mockClear();
       (mockPlayer.getAvailableSegments as jest.Mock).mockReturnValue({
         'video/mp4': {
           v1: [
@@ -569,25 +555,23 @@ describe('CmcdIntegration', () => {
         length: 1_000_000,
       } as unknown as Parameters<CmcdIntegration['preprocessHttpResponse']>[1]);
       playerEventHandlers.playing();
-      startupMock.mockClear();
 
       const keysBefore = await sendSegmentRequest();
-      expect(keysBefore).toEqual(expect.arrayContaining(['br', 'mtp', 'rtp', 'nor']));
-      expect(startupMock).not.toHaveBeenCalled();
+      expect(keysBefore).toEqual(expect.arrayContaining(['br', 'mtp', 'rtp', 'nor', 'sf']));
+      expect(keysBefore).not.toContain('su');
 
       playerEventHandlers.stallstarted();
       playerEventHandlers.playing();
       playerEventHandlers.sourceunloaded();
-      sfMock.mockClear();
 
       const keysAfter = await sendSegmentRequest();
 
       expect(keysAfter).not.toContain('br');
       expect(keysAfter).not.toContain('mtp');
       expect(keysAfter).not.toContain('bs');
-      expect(startupMock).toHaveBeenCalledTimes(1);
+      expect(keysAfter).toContain('su');
       // `sf` of the old source is not reused
-      expect(sfMock).not.toHaveBeenCalled();
+      expect(keysAfter).not.toContain('sf');
     });
 
     it('resets the audio state of the previous source when it is unloaded', async () => {
@@ -612,9 +596,6 @@ describe('CmcdIntegration', () => {
   });
 
   describe('content id (cid) and session id (sid)', () => {
-    const { CmcdContentId, CmcdSessionId } = jest.requireMock<typeof import('../../src/ts/Cmcd')>('../../src/ts/Cmcd');
-    const cidMock = CmcdContentId as unknown as jest.Mock;
-    const sidMock = CmcdSessionId as unknown as jest.Mock;
     let warnSpy: jest.SpiedFunction<typeof console.warn>;
 
     const send = async (integration: CmcdIntegration) => {
@@ -634,8 +615,6 @@ describe('CmcdIntegration', () => {
     };
 
     beforeEach(() => {
-      cidMock.mockClear();
-      sidMock.mockClear();
       warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => undefined);
     });
 
@@ -644,16 +623,16 @@ describe('CmcdIntegration', () => {
     it('sends ids of up to 64 characters', async () => {
       await send(createIntegration({ contentId: 'c'.repeat(64), sessionId: 's'.repeat(64) }));
 
-      expect(cidMock).toHaveBeenCalledWith('c'.repeat(64));
-      expect(sidMock).toHaveBeenCalledWith('s'.repeat(64));
+      expect(lastCmcdData().cid).toEqual('c'.repeat(64));
+      expect(lastCmcdData().sid).toEqual('s'.repeat(64));
       expect(warnSpy).not.toHaveBeenCalled();
     });
 
     it('omits ids longer than 64 characters instead of truncating them', async () => {
       await send(createIntegration({ contentId: 'c'.repeat(65), sessionId: 's'.repeat(65) }));
 
-      expect(cidMock).not.toHaveBeenCalled();
-      expect(sidMock).not.toHaveBeenCalled();
+      expect(lastCmcdData().cid).toBeUndefined();
+      expect(lastCmcdData().sid).toBeUndefined();
     });
 
     it('warns only once per value', async () => {

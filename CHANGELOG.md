@@ -6,6 +6,9 @@ The format is based on [Keep a Changelog](http://keepachangelog.com/)
 and this project adheres to [Semantic Versioning](http://semver.org/).
 
 ## [Unreleased]
+### Changed
+- Internal refactoring of CMCD encoding in preparation for CMCD v2; no change in output.
+
 ### Fixed
 - Measured throughput (`mtp`) was reported in kilobytes per second instead of kilobits per second, making the value 8x too low (and frequently rounding down to 0, so the key was omitted entirely). Throughput is now converted from bytes to bits before scaling to kbps.
 - Next object request (`nor`) contained the absolute URL of the next segment. It is now the path relative to the current request, URL encoded as required by the specification. `nor` is omitted if the next segment is on a different origin.
