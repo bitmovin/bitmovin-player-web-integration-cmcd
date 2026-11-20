@@ -7,6 +7,7 @@
  */
 
 import { quoteString, serializeString, serializeToken } from './StructuredField';
+import { createWarnOnce } from './Log';
 
 export enum CmcdObjectTypeToken {
   AudioOnly = 'a',
@@ -205,14 +206,7 @@ interface CmcdEntry {
 }
 
 /** Warnings already logged, to log each invalid key or value only once */
-const loggedWarnings = new Set<string>();
-
-function warnOnce(message: string) {
-  if (!loggedWarnings.has(message)) {
-    loggedWarnings.add(message);
-    console.warn(message);
-  }
-}
+const warnOnce = createWarnOnce();
 
 function toEntries(data: CmcdData, customKeys: CmcdCustomKey[], forHeader: boolean): CmcdEntry[] {
   const entries: CmcdEntry[] = [];

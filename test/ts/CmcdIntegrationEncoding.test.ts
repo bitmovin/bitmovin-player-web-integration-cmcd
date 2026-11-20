@@ -1,6 +1,7 @@
 import { describe, beforeEach, afterEach, it, expect, jest } from '@jest/globals';
 import { HttpRequest, HttpRequestMethod, HttpRequestType, HttpResponseType, PlayerAPI } from 'bitmovin-player';
 import { CmcdConfig, CmcdIntegration, CustomKey, HeaderType } from '../../src/ts/CmcdIntegration';
+import * as Cmcd from '../../src/ts/Cmcd';
 
 // Runs the real encoder through `preprocessHttpRequest`.
 describe('CmcdIntegration encoding', () => {
@@ -114,6 +115,31 @@ describe('CmcdIntegration encoding', () => {
 
     expect(request.url).toEqual(`${segmentUrl}?token=a`);
     expect(warnSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it('warns once per distinct encoding error', async () => {
+    const integration = createIntegration({ useQueryArgs: true });
+    const encodeSpy = jest
+      .spyOn(Cmcd, 'cmcdDataToUrlParameter')
+      .mockImplementationOnce(() => {
+        throw new Error('first');
+      })
+      .mockImplementationOnce(() => {
+        throw new Error('second');
+      })
+      .mockImplementationOnce(() => {
+        throw new Error('first');
+      });
+
+    await sendSegmentRequest(integration);
+    await sendSegmentRequest(integration);
+    await sendSegmentRequest(integration);
+    encodeSpy.mockRestore();
+
+    expect(warnSpy.mock.calls.map((call) => call[0])).toEqual([
+      'CMCD: data is not sent: Error: first',
+      'CMCD: data is not sent: Error: second',
+    ]);
   });
 
   it('omits header values that are not printable ASCII', async () => {

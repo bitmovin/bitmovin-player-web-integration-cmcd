@@ -31,6 +31,7 @@ import {
   CmcdVersionNumbers,
 } from './Cmcd';
 import { toRelativeUrl } from './Url';
+import { createWarnOnce } from './Log';
 
 export { CmcdCustomKey as CustomKey } from './Cmcd';
 export { CmcdHeaderType as HeaderType } from './Cmcd';
@@ -104,8 +105,7 @@ export class CmcdIntegration {
   private lastMeasuredThroughputAudio: number;
   private lastMeasuredThroughputVideo: number;
   private manifestType: CmcdStreamingFormatToken | null;
-  private warnedIds = new Set<string>();
-  private warnedEncodingErrors = new Set<string>();
+  private warnOnce = createWarnOnce();
 
   constructor(config: CmcdConfig) {
     this.useQueryArgs = config.useQueryArgs || false;
@@ -181,11 +181,8 @@ export class CmcdIntegration {
         };
       }
     } catch (error) {
-      const message = `CMCD: data is not sent: ${error}`;
-      if (!this.warnedEncodingErrors.has(message)) {
-        this.warnedEncodingErrors.add(message);
-        console.warn(message);
-      }
+      // Deduplicated per message: different values with the same error type are reported once.
+      this.warnOnce(`CMCD: data is not sent: ${error}`);
     }
 
     return Promise.resolve(request);
@@ -281,10 +278,7 @@ export class CmcdIntegration {
     if (value.length <= MAX_ID_LENGTH) {
       return true;
     }
-    if (!this.warnedIds.has(value)) {
-      this.warnedIds.add(value);
-      console.warn(`CMCD: '${key}' exceeds ${MAX_ID_LENGTH} characters (${value.length}) and is not sent.`);
-    }
+    this.warnOnce(`CMCD: '${key}' value '${value}' exceeds ${MAX_ID_LENGTH} characters and is not sent.`);
     return false;
   }
 
