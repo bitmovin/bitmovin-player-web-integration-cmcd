@@ -48,6 +48,7 @@ import {
   CmcdVersion,
   CmcdVersionNumbers,
 } from './Cmcd';
+import { toRelativeUrl } from './Url';
 
 export { CmcdCustomKey as CustomKey } from './Cmcd';
 export { CmcdHeaderType as HeaderType } from './Cmcd';
@@ -99,6 +100,12 @@ function appendCmcdQueryArg(url: string, cmcdQueryArg: string): string {
   return `${path}?${query}${fragment}`;
 }
 
+/**
+ * Requested maximum throughput (`rtp`) as a multiple of the encoded bitrate (`br`)
+ * of the requested object. Matches the ratio of the example in CTA-5004 (2 Mbps -> 10 Mbps).
+ */
+const RTP_ENCODED_BITRATE_FACTOR = 5;
+
 export class CmcdIntegration {
   private sessionId: string;
   private contentId: string;
@@ -147,6 +154,8 @@ export class CmcdIntegration {
       this.isSeekingOrTimeshiftingOrStartup = true;
     });
     this.player.on(player.exports.PlayerEvent.StallEnded, () => (this.isSeekingOrTimeshiftingOrStartup = false));
+    // Startup ends when playback begins. Without this, `su` is sent until the first seek or stall.
+    this.player.on(player.exports.PlayerEvent.Playing, () => (this.isSeekingOrTimeshiftingOrStartup = false));
     this.player.on(player.exports.PlayerEvent.Seek, () => (this.isSeekingOrTimeshiftingOrStartup = true));
     this.player.on(player.exports.PlayerEvent.Seeked, () => (this.isSeekingOrTimeshiftingOrStartup = false));
     this.player.on(player.exports.PlayerEvent.TimeShift, () => (this.isSeekingOrTimeshiftingOrStartup = true));
@@ -188,7 +197,9 @@ export class CmcdIntegration {
       return Promise.resolve(response);
     }
 
-    const kbps = bytes / time / 1000;
+    // `elapsedTime` is in seconds and `length` in bytes. CMCD `mtp` is expressed
+    // in kilobits per second, so convert bytes to bits (* 8) before scaling to kbps.
+    const kbps = (bytes * 8) / time / 1000;
 
     if (type === (this.player?.exports.HttpRequestType.MEDIA_AUDIO || 'media/audio')) {
       this.lastMeasuredThroughputAudio = Math.round(kbps * 100) / 100;
@@ -227,22 +238,27 @@ export class CmcdIntegration {
       data.push(new CmcdSessionId(this.sessionId));
     }
 
-    if (this.isSeekingOrTimeshiftingOrStartup) {
+    const isStartup = this.isSeekingOrTimeshiftingOrStartup;
+    if (isStartup) {
       data.push(new CmcdStartup(true));
     }
 
-    if (this.stalledSinceLastRequest || this.player.isStalled()) {
+    const isBufferStarvation = this.stalledSinceLastRequest || this.player.isStalled();
+    if (isBufferStarvation) {
       data.push(new CmcdBufferStarvation(true));
       this.stalledSinceLastRequest = false;
     }
 
-    if (type === this.player?.exports.HttpRequestType.MEDIA_AUDIO) {
-      data = data.concat(this.getAudioSegmentRequestSpecificData(request));
-    } else if (type === this.player?.exports.HttpRequestType.MEDIA_VIDEO) {
-      data = data.concat(this.getVideoSegmentRequestSpecificData(request));
+    if (type === this.player.exports.HttpRequestType.MEDIA_AUDIO) {
+      data = data.concat(this.getSegmentRequestSpecificData(request, 'audio'));
+    } else if (type === this.player.exports.HttpRequestType.MEDIA_VIDEO) {
+      data = data.concat(this.getSegmentRequestSpecificData(request, 'video'));
     }
 
-    data.concat(this.getRequestedMaximumThroughput(data));
+    // The object is needed as fast as possible during startup and after a stall, so no throughput cap is requested.
+    if (!isStartup && !isBufferStarvation) {
+      data = data.concat(this.getRequestedMaximumThroughput(data));
+    }
 
     // TODO: data.push(new CmcdNextRangeRequest('byte-range'));
 
@@ -254,18 +270,11 @@ export class CmcdIntegration {
   }
 
   private getRequestedMaximumThroughput(data: CmcdBase[]): CmcdBase[] {
-    const cmcdEncodedBitrate = data.find((obj) => obj.key === CmcdKeysToken.EncodedBitrate) as CmcdEncodedBitrate;
-    const cmcdObjectDuration = data.find((obj) => obj.key === CmcdKeysToken.ObjectDuration) as CmcdObjectDuration;
-    const isBufferStarvation = Boolean(data.find((obj) => obj.key === CmcdKeysToken.ObjectDuration));
-    const cmcdStartup = data.find((obj) => obj.key === CmcdKeysToken.Startup);
-    const isStartup = cmcdStartup && !cmcdStartup.value;
-    if (cmcdEncodedBitrate && cmcdObjectDuration && !isBufferStarvation && !isStartup) {
-      const segmentDurationSec = Number(cmcdObjectDuration.value) * 1000;
-      const encodedBitrateKbps = Number(cmcdEncodedBitrate.value);
-      const maxThroughput = encodedBitrateKbps * (segmentDurationSec / 2);
-      return [new CmcdRequestedMaximumThroughput(maxThroughput)];
+    const encodedBitrate = data.find((obj) => obj.key === CmcdKeysToken.EncodedBitrate);
+    if (!encodedBitrate) {
+      return [];
     }
-    return [];
+    return [new CmcdRequestedMaximumThroughput(Number(encodedBitrate.value) * RTP_ENCODED_BITRATE_FACTOR)];
   }
 
   private getStreamingType(type: HttpRequestType) {
@@ -325,102 +334,52 @@ export class CmcdIntegration {
     return data;
   }
 
-  private getAudioSegmentRequestSpecificData(request: HttpRequest): CmcdBase[] {
+  private getSegmentRequestSpecificData(request: HttpRequest, mediaType: 'audio' | 'video'): CmcdBase[] {
     let data: CmcdBase[] = [];
-
-    if (this.currentAudioQuality && this.currentAudioQuality.bandwidth) {
-      data.push(new CmcdEncodedBitrate(Math.round(this.currentAudioQuality.bandwidth / 1000)));
-    }
-
-    if (this.lastMeasuredThroughputAudio) {
-      data.push(new CmcdMeasuredThroughput(this.lastMeasuredThroughputAudio));
-    }
-
     if (!this.player) {
       return data;
     }
 
-    const audioBuffer = this.player.buffer.getLevel(
-      this.player.exports.BufferType.ForwardDuration,
-      this.player.exports.MediaType.Audio
-    );
-    if (audioBuffer.targetLevel > 0) {
-      data.push(new CmcdBufferLength(audioBuffer.level * 1000));
+    const isAudio = mediaType === 'audio';
+    const currentQuality = isAudio ? this.currentAudioQuality : this.currentVideoQuality;
+    const lastMeasuredThroughput = isAudio ? this.lastMeasuredThroughputAudio : this.lastMeasuredThroughputVideo;
 
-      const deadline = audioBuffer.level / this.player?.getPlaybackSpeed();
+    if (currentQuality && currentQuality.bandwidth) {
+      data.push(new CmcdEncodedBitrate(Math.round(currentQuality.bandwidth / 1000)));
+    }
+
+    if (lastMeasuredThroughput) {
+      data.push(new CmcdMeasuredThroughput(lastMeasuredThroughput));
+    }
+
+    const buffer = this.player.buffer.getLevel(
+      this.player.exports.BufferType.ForwardDuration,
+      isAudio ? this.player.exports.MediaType.Audio : this.player.exports.MediaType.Video
+    );
+    if (buffer.targetLevel > 0) {
+      data.push(new CmcdBufferLength(buffer.level * 1000));
+
+      const deadline = buffer.level / this.player.getPlaybackSpeed();
       data.push(new CmcdDeadline(deadline * 1000));
     }
 
-    const audioTopBitrate =
-      this.player.getAvailableAudioQualities().reduce((prev, current) => {
-        return Math.max(prev, current.bitrate);
-      }, 0) / 1000;
-    if (audioTopBitrate > 0) {
-      data.push(new CmcdTopBitrate(audioTopBitrate));
+    const qualities = isAudio ? this.player.getAvailableAudioQualities() : this.player.getAvailableVideoQualities();
+    const topBitrate = qualities.reduce((prev, current) => Math.max(prev, current.bitrate), 0) / 1000;
+    if (topBitrate > 0) {
+      data.push(new CmcdTopBitrate(topBitrate));
     }
 
-    if (this.currentVideoQuality) {
+    if (currentQuality) {
       try {
         const allSegments = this.player.getAvailableSegments();
         for (const mimeType in allSegments) {
-          if (mimeType.startsWith('video/')) {
-            const segments = allSegments[mimeType][this.currentVideoQuality.id];
+          const segments = allSegments[mimeType][currentQuality.id];
+          if (mimeType.startsWith(`${mediaType}/`) && segments) {
             data = data.concat(this.getNextObjectAndObjectDurationCmcdData(segments, request.url));
           }
         }
       } catch (error) {
-        console.error('Error processing audio segments:', error);
-      }
-    }
-
-    return data;
-  }
-
-  private getVideoSegmentRequestSpecificData(request: HttpRequest): CmcdBase[] {
-    let data: CmcdBase[] = [];
-
-    if (this.currentVideoQuality && this.currentVideoQuality.bandwidth) {
-      data.push(new CmcdEncodedBitrate(Math.round(this.currentVideoQuality.bandwidth / 1000)));
-    }
-
-    if (this.lastMeasuredThroughputVideo) {
-      data.push(new CmcdMeasuredThroughput(this.lastMeasuredThroughputVideo));
-    }
-
-    if (!this.player) {
-      return data;
-    }
-
-    const videoBuffer = this.player.buffer.getLevel(
-      this.player.exports.BufferType.ForwardDuration,
-      this.player.exports.MediaType.Video
-    );
-    if (videoBuffer.targetLevel > 0) {
-      data.push(new CmcdBufferLength(videoBuffer.level * 1000));
-
-      const deadline = videoBuffer.level / this.player?.getPlaybackSpeed();
-      data.push(new CmcdDeadline(deadline * 1000));
-    }
-
-    const videoTopBitrate =
-      this.player.getAvailableVideoQualities().reduce((prev, current) => {
-        return Math.max(prev, current.bitrate);
-      }, 0) / 1000;
-    if (videoTopBitrate > 0) {
-      data.push(new CmcdTopBitrate(videoTopBitrate));
-    }
-
-    if (this.currentVideoQuality) {
-      try {
-        const allSegments = this.player.getAvailableSegments();
-        for (const mimeType in allSegments) {
-          if (mimeType.startsWith('video/')) {
-            const segments = allSegments[mimeType][this.currentVideoQuality.id];
-            data = data.concat(this.getNextObjectAndObjectDurationCmcdData(segments, request.url));
-          }
-        }
-      } catch (error) {
-        console.error('Error processing video segments:', error);
+        console.error(`Error processing ${mediaType} segments:`, error);
       }
     }
 
@@ -433,15 +392,16 @@ export class CmcdIntegration {
     const currentSegmentIndex = segments.findIndex((value) => value.url === requestUrl);
     if (currentSegmentIndex > -1) {
       const currentSegment = segments[currentSegmentIndex];
-      if (!Number.isNaN(currentSegment.duration)) {
+      if (Number.isFinite(currentSegment.duration)) {
         data.push(new CmcdObjectDuration(Number(currentSegment.duration) * 1000));
       }
 
       if (currentSegmentIndex + 1 < segments.length) {
         const nextSegment = segments[currentSegmentIndex + 1];
-        if (nextSegment.url) {
-          // TODO what about range requests?
-          data.push(new CmcdNextObjectRequest(nextSegment.url));
+        // TODO what about range requests?
+        const relativePath = nextSegment.url ? toRelativeUrl(requestUrl, nextSegment.url) : null;
+        if (relativePath) {
+          data.push(new CmcdNextObjectRequest(relativePath));
         }
       }
     }
