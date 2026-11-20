@@ -145,6 +145,8 @@ describe('CmcdIntegration v2', () => {
         MediaType: { Video: 'video', Audio: 'audio' },
       },
       on: (event: string, handler: () => void) => (handlers[event] = [...(handlers[event] || []), handler]),
+      off: (event: string, handler: () => void) =>
+        (handlers[event] = (handlers[event] || []).filter((registered) => registered !== handler)),
     } as unknown as PlayerAPI;
     integration = create();
   });
@@ -164,16 +166,54 @@ describe('CmcdIntegration v2', () => {
         handlers = {};
         integration = create({ version });
         startPlayback();
-        emit('warning', { code: 1000 });
 
         const data = await dataOf();
         expect(data.v).toBe(1);
-        for (const key of ['bsa', 'bsda', 'dfa', 'lb', 'msd', 'pb', 'pt', 'sn', 'sta', 'tbl'] as const) {
+        for (const key of ['bsa', 'bsda', 'dfa', 'ec', 'lb', 'msd', 'pb', 'pt', 'sn', 'sta', 'tbl'] as const) {
           expect(data[key]).toBeUndefined();
         }
         expect(handlers.play).toBeUndefined();
-        expect(handlers.warning).toBeUndefined();
+        expect(handlers.error).toBeUndefined();
       }
+    });
+  });
+
+  describe('setPlayer', () => {
+    it('removes the listeners of the previous player', async () => {
+      const counts = () => Object.keys(handlers).map((event) => handlers[event].length);
+      const countsBefore = counts();
+      integration.setPlayer(mockPlayer);
+
+      expect(counts()).toEqual(countsBefore);
+      expect(handlers.stallstarted).toHaveLength(1);
+      startPlayback();
+      await dataOf();
+      state.stalled = true;
+      emit('stallstarted');
+      expect((await dataOf()).bsa).toBe(1);
+    });
+  });
+
+  describe('request errors', () => {
+    it('sends the request unchanged and warns once if no player is set', async () => {
+      const withoutPlayer = new CmcdIntegration({ version: 2 });
+      const request = await send(HttpRequestType.MEDIA_VIDEO, videoSegments[0].url, withoutPlayer);
+      await send(HttpRequestType.MEDIA_VIDEO, videoSegments[0].url, withoutPlayer);
+
+      expect(request.url).toEqual(videoSegments[0].url);
+      expect(request.headers).toEqual({});
+      expect(warnSpy).toHaveBeenCalledTimes(1);
+      expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('Bitmovin Player not provided'));
+    });
+
+    it('sends the request unchanged if a player API throws', async () => {
+      (mockPlayer as unknown as { isLive: () => boolean }).isLive = () => {
+        throw new Error('not available');
+      };
+      const request = await send(HttpRequestType.MEDIA_VIDEO, videoSegments[0].url);
+
+      expect(request.headers).toEqual({});
+      expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('not available'));
     });
   });
 
@@ -285,6 +325,19 @@ describe('CmcdIntegration v2', () => {
 
       expect((await dataOf()).sn).toBe(1);
     });
+
+    it('keeps the state of the 16 most recently used origins', async () => {
+      const urlOf = (index: number) => `https://cdn${index}.example.com/seg.m4s`;
+      for (let index = 0; index < 16; index++) {
+        await dataOf(HttpRequestType.MEDIA_VIDEO, urlOf(index));
+      }
+      // Origin 0 is the most recently used one now, so origin 1 is dropped by origin 16.
+      expect((await dataOf(HttpRequestType.MEDIA_VIDEO, urlOf(0))).sn).toBe(1);
+      await dataOf(HttpRequestType.MEDIA_VIDEO, urlOf(16));
+
+      expect((await dataOf(HttpRequestType.MEDIA_VIDEO, urlOf(0))).sn).toBe(2);
+      expect((await dataOf(HttpRequestType.MEDIA_VIDEO, urlOf(1))).sn).toBe(0);
+    });
   });
 
   describe('media start delay (msd)', () => {
@@ -328,12 +381,12 @@ describe('CmcdIntegration v2', () => {
       expect((await dataOf()).msd).toBe(300);
     });
 
-    it('is not sent with autoplay, as there is no play event', async () => {
+    it('is measured from the play event of autoplay', async () => {
       state.autoplay = true;
-      state.playing = true;
-      emit('playing', { timestamp: 1200 });
+      expect((await dataOf()).sta).toBe('s');
+      startPlayback(1000, 1400);
 
-      expect((await dataOf()).msd).toBeUndefined();
+      expect((await dataOf()).msd).toBe(400);
     });
   });
 
@@ -349,6 +402,10 @@ describe('CmcdIntegration v2', () => {
       startPlayback();
       let data = await dataOf();
       expect([data.bsa, data.bsd, data.bsda]).toEqual([0, undefined, 0]);
+      // Known zero values are sent.
+      expect((cmcdDataToHeader as jest.Mock).mock.results.at(-1)?.value).toEqual(
+        expect.objectContaining({ 'CMCD-Status': 'bsa=(0),bsda=(0),pt=12346,rtp=10000' })
+      );
 
       stall(10_000, 10_500);
       stall(20_000, 21_200);
@@ -390,29 +447,78 @@ describe('CmcdIntegration v2', () => {
 
     it('is reset on a new session id', async () => {
       startPlayback();
+      await dataOf();
       stall(10_000, 10_500);
       integration.setSessionId('session-id-456');
 
       const data = await dataOf();
       expect([data.bsa, data.bsd, data.bsda]).toEqual([0, undefined, 0]);
     });
+
+    it('counts an ongoing rebuffering in the new session from the session change', async () => {
+      const nowSpy = jest.spyOn(Date, 'now').mockReturnValue(20_000);
+      startPlayback();
+      await dataOf();
+      state.stalled = true;
+      emit('stallstarted', { timestamp: 10_000 });
+      integration.setSessionId('session-id-456');
+      emit('stallended', { timestamp: 20_500 });
+      nowSpy.mockRestore();
+
+      const data = await dataOf();
+      expect([data.bsa, data.bsd, data.bsda]).toEqual([1, [500], 500]);
+    });
+
+    it('reports each rebuffering duration once to each origin', async () => {
+      const otherOrigin = 'https://drm.example.com/license';
+      startPlayback();
+      await dataOf();
+      await dataOf(HttpRequestType.DRM_LICENSE_WIDEVINE, otherOrigin);
+      stall(10_000, 10_500);
+
+      expect((await dataOf()).bsd).toEqual([500]);
+      expect((await dataOf()).bsd).toBeUndefined();
+      expect((await dataOf(HttpRequestType.DRM_LICENSE_WIDEVINE, otherOrigin)).bsd).toEqual([500]);
+      expect((await dataOf(HttpRequestType.DRM_LICENSE_WIDEVINE, otherOrigin)).bsd).toBeUndefined();
+    });
   });
 
   describe('player error codes (ec)', () => {
-    it('buffers error and warning codes until the next request', async () => {
-      emit('warning', { code: 1105 });
-      emit('warning', { code: 1105 });
+    it('buffers error codes until the next request', async () => {
+      await dataOf();
       emit('error', { code: 3011 });
+      emit('error', { code: 3011 });
+      emit('error', { code: 1001 });
 
-      expect((await dataOf()).ec).toEqual(['1105', '3011']);
+      expect((await dataOf()).ec).toEqual(['3011', '1001']);
       expect((cmcdDataToHeader as jest.Mock).mock.results.at(-1)?.value).toEqual(
-        expect.objectContaining({ 'CMCD-Status': 'ec=("1105" "3011"),pr=0.0' })
+        expect.objectContaining({ 'CMCD-Status': 'bsa=(0),bsda=(0),ec=("3011" "1001"),pr=0.0' })
       );
       expect((await dataOf()).ec).toBeUndefined();
     });
 
+    it('does not report warnings, as their codes overlap with error codes', async () => {
+      await dataOf();
+      emit('warning', { code: 1001 });
+
+      expect((await dataOf()).ec).toBeUndefined();
+      expect(handlers.warning).toBeUndefined();
+    });
+
+    it('reports each error code once to each origin', async () => {
+      const otherOrigin = 'https://drm.example.com/license';
+      await dataOf();
+      await dataOf(HttpRequestType.DRM_LICENSE_WIDEVINE, otherOrigin);
+      emit('error', { code: 3011 });
+
+      expect((await dataOf()).ec).toEqual(['3011']);
+      expect((await dataOf()).ec).toBeUndefined();
+      expect((await dataOf(HttpRequestType.DRM_LICENSE_WIDEVINE, otherOrigin)).ec).toEqual(['3011']);
+    });
+
     it('drops buffered codes on a new session id', async () => {
-      emit('warning', { code: 1105 });
+      await dataOf();
+      emit('error', { code: 3011 });
       integration.setSessionId('session-id-456');
 
       expect((await dataOf()).ec).toBeUndefined();
@@ -440,12 +546,12 @@ describe('CmcdIntegration v2', () => {
       expect(mockPlayer.getCurrentTime).toHaveBeenLastCalledWith();
     });
 
-    it('is not sent for live without a wallclock time', async () => {
+    it('is the current time for live without a wallclock time', async () => {
       state.live = true;
-      state.time = 120;
+      state.time = 632.782;
       startPlayback();
 
-      expect((await dataOf()).pt).toBeUndefined();
+      expect((await dataOf()).pt).toBe(632782);
     });
   });
 
@@ -480,6 +586,29 @@ describe('CmcdIntegration v2', () => {
     it('sends dfa for video requests only', async () => {
       expect((await dataOf()).dfa).toBe(7);
       expect((await dataOf(HttpRequestType.MEDIA_AUDIO, audioSegments[0].url)).dfa).toBeUndefined();
+    });
+
+    it('sends dfa=0', async () => {
+      state.droppedFrames = 0;
+
+      expect((await send(HttpRequestType.MEDIA_VIDEO, videoSegments[0].url)).headers['CMCD-Request']).toContain(
+        'dfa=0'
+      );
+    });
+
+    it('counts dfa since session start across sources', async () => {
+      expect((await dataOf()).dfa).toBe(7);
+      emit('sourceunloaded');
+      state.droppedFrames = 3;
+      expect((await dataOf()).dfa).toBe(10);
+
+      // A new session id starts at 0 from the current count.
+      integration.setSessionId('session-id-456');
+      state.droppedFrames = 5;
+      expect((await dataOf()).dfa).toBe(2);
+      emit('sourceunloaded');
+      state.droppedFrames = 1;
+      expect((await dataOf()).dfa).toBe(3);
     });
 
     it('does not send segment keys for other requests', async () => {
@@ -519,20 +648,20 @@ describe('CmcdIntegration v2', () => {
         // Requested before play: preloading
         'CMCD-Request': 'sn=0,sta=d,su',
         'CMCD-Object': 'ot=m',
-        'CMCD-Status': 'pr=0.0',
+        'CMCD-Status': 'bsa=(0),bsda=(0),pr=0.0',
         'CMCD-Session': 'cid="content-id-123",com.example-k="7",sf=d,sid="session-id-123",st=v,v=2',
       },
       {
         'CMCD-Request': 'bl=(4000),dfa=7,dl=4000,nor=("seg2.m4s"),pb=(1000;v),sn=1,sta=s,su,tbl=(30000)',
         'CMCD-Object': 'br=(2000;v),d=4000,lb=(300;v),ot=v,tb=(6000;v)',
-        'CMCD-Status': 'pr=0.0',
+        'CMCD-Status': 'bsa=(0),bsda=(0),pr=0.0',
         'CMCD-Session': 'cid="content-id-123",com.example-k="7",sf=d,sid="session-id-123",st=v,v=2',
       },
       {
         'CMCD-Request':
           'bl=(4000),dfa=7,dl=4000,mtp=(16000),nor=("../300kbps/seg%203.m4s"),pb=(1000;v),sn=2,sta=p,tbl=(30000)',
         'CMCD-Object': 'br=(2000;v),d=4000,lb=(300;v),ot=v,tb=(6000;v)',
-        'CMCD-Status': 'pt=12346,rtp=10000',
+        'CMCD-Status': 'bsa=(0),bsda=(0),pt=12346,rtp=10000',
         'CMCD-Session': 'cid="content-id-123",com.example-k="7",msd=200,sf=d,sid="session-id-123",st=v,v=2',
       },
     ]);

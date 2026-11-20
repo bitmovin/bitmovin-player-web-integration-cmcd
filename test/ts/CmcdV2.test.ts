@@ -294,7 +294,9 @@ describe('CMCD v2 encoding', () => {
       expect(keys({ bl: 5450, mtp: 49, rtp: 40, br: 1234.5, d: 4003.9999999999995, tbl: 29950 })).toEqual(
         'bl=(5500),br=(1235),d=4004,tbl=(30000)'
       );
-      expect(keys({ bsa: 0, bsda: 0, dfa: 0, bsd: [] })).toEqual('');
+      expect(keys({ bsd: [] })).toEqual('');
+      // Known zero values are sent.
+      expect(keys({ bsa: 0, bsda: 0, dfa: 0 })).toEqual('bsa=(0),bsda=(0),dfa=0');
       expect(keys({ dfa: 32, sn: 0, msd: 1700.4, ltc: 13500.2, pt: 1752000000123.6 })).toEqual(
         'dfa=32,ltc=13500,msd=1700,pt=1752000000124,sn=0'
       );

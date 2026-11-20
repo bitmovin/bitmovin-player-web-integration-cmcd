@@ -70,7 +70,7 @@ const cmcdConfig: CmcdConfig = {
 
 Differences to v1:
 - `v=2` is sent with each request.
-- Keys of type Inner List always use list syntax, e.g. `bl=(2000)`, `nor=("seg2.m4s")`. `br`, `lb`, `pb` and `tb` carry the object type of audio and video requests as parameter, e.g. `br=(3000;v)`.
+- Keys of type Inner List always use list syntax, e.g. `bl=(2000)`, `nor=("seg2.m4s")`. `br`, `lb`, `pb` and `tb` carry the object type of audio and video requests as parameter, e.g. `br=(3000;v)`. Audio requests carry `;a`, as video requests carry `;v` in spec example 8.1.1 (example 8.1.2 omits it for audio).
 - `pr` is sent in `CMCD-Status` as Decimal, e.g. `pr=2.0`.
 - `cid` can have up to 128 characters (`sid` up to 64).
 - `nor` is sent as plain relative path. It is URL encoded only with the whole payload in query mode.
@@ -83,19 +83,23 @@ Additional keys in v2:
 | Key | Description | Source |
 | --- | --- | --- |
 | `sta` | Play state: `d` before play, `s` starting, `p` playing, `k` seeking, `r` rebuffering, `a` paused, `e` ended, `f` fatal error | Player events and state at request time |
-| `sn` | Sequence number per origin, starting at 0, reset on a new session id | Counted per request |
+| `sn` | Sequence number per origin (report destination), starting at 0 | Counted per request |
 | `msd` | Startup delay from `Play` to `Playing`, sent once per session id with the next request | Player events |
-| `pt` | Playhead time in ms. Live: epoch ms, only if the player provides a wallclock time | `getCurrentTime()` |
-| `bsa`, `bsda` | Rebuffering count and duration since session start, not sent while 0 | `StallStarted`/`StallEnded` |
-| `bsd` | Durations of the rebufferings completed since the prior request | `StallStarted`/`StallEnded` |
-| `ec` | Player error and warning codes since the prior request | `Error`/`Warning` events |
+| `pt` | Playhead time in ms. VOD: offset from the start. Live: epoch ms if the player knows the wallclock time, else the player's current time | `getCurrentTime()` |
+| `bsa`, `bsda` | Rebuffering count and duration since session start, also when 0 | `StallStarted`/`StallEnded` |
+| `bsd` | Durations of the completed rebufferings, reported once to each origin | `StallStarted`/`StallEnded` |
+| `ec` | Player error codes, reported once to each origin. Warnings are not reported, as their codes overlap with error codes | `Error` events |
 | `lb` | Lowest bitrate of the requested media type | `getAvailableVideoQualities()`/`getAvailableAudioQualities()` |
 | `tbl` | Target buffer length of the requested media type | `buffer.getLevel()` |
 | `pb` | Bitrate being played of the requested media type | `getPlaybackVideoData()`/`getPlaybackAudioData()` |
-| `dfa` | Dropped frames, video requests only, not sent while 0 | `getDroppedVideoFrames()` |
+| `dfa` | Dropped frames since session start, video requests only, also when 0 | `getDroppedVideoFrames()` |
 | `ltc` | Live latency | `lowlatency.getLatency()` |
 
-Rebuffering excludes stalls during startup and seeking. `msd` is not sent with `PlaybackConfig.autoplay`, as the player fires no `Play` event then.
+Rebuffering excludes stalls during startup and seeking. With `PlaybackConfig.autoplay`, `msd` is measured from the `Play` event of the autoplay.
+
+`sn`, `bsa`, `bsda`, `dfa` and `msd` continue across sources until the application sets a new session id with `setSessionId`. A new session id resets them. `bsd` and `ec` are buffered per origin for up to 16 origins; the least recently used origin is dropped.
+
+Known limitation: if the browser blocks autoplay, `sta` stays `s` until playback starts.
 
 Not implemented:
 - Event Mode and all Event-only keys

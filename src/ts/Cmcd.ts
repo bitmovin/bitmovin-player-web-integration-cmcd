@@ -75,45 +75,6 @@ export enum CmcdVersionNumbers {
   v2 = 2,
 }
 
-/**
- * Enum containing all CMCD keys as defined in
- * https://cdn.cta.tech/cta/media/media/resources/standards/pdfs/cta-5004-final.pdf
- */
-export enum CmcdKeysToken {
-  EncodedBitrate = 'br',
-  BufferLength = 'bl',
-  BufferStarvation = 'bs',
-  ContentId = 'cid',
-  ObjectDuration = 'd',
-  Deadline = 'dl',
-  MeasuredThroughput = 'mtp',
-  NextObjectRequest = 'nor',
-  NextRangeRequest = 'nrr',
-  ObjectType = 'ot',
-  PlaybackRate = 'pr',
-  RequestedMaximumThroughput = 'rtp',
-  StreamingFormat = 'sf',
-  SessionId = 'sid',
-  StreamType = 'st',
-  Startup = 'su',
-  TopBitrate = 'tb',
-  CmcdVersion = 'v',
-  // v2 Request Mode keys
-  BufferStarvationAbsolute = 'bsa',
-  BufferStarvationDuration = 'bsd',
-  BufferStarvationDurationAbsolute = 'bsda',
-  DroppedFramesAbsolute = 'dfa',
-  PlayerErrorCode = 'ec',
-  LowestEncodedBitrate = 'lb',
-  LiveStreamLatency = 'ltc',
-  MediaStartDelay = 'msd',
-  PlayheadBitrate = 'pb',
-  PlayheadTime = 'pt',
-  SequenceNumber = 'sn',
-  State = 'sta',
-  TargetBufferLength = 'tbl',
-}
-
 export enum CmcdHeaderType {
   Object = 'CMCD-Object',
   Request = 'CMCD-Request',
@@ -253,12 +214,12 @@ export const CMCD_V2_KEYS: CmcdKeyTable = {
   bl: { header: CmcdHeaderType.Request, type: 'integer', round: 100, list: 'plain' },
   br: { header: CmcdHeaderType.Object, type: 'integer', round: 1, list: 'typed' },
   bs: { header: CmcdHeaderType.Status, type: 'boolean', omit: false },
-  bsa: { header: CmcdHeaderType.Status, type: 'integer', omit: 0, list: 'plain' },
+  bsa: { header: CmcdHeaderType.Status, type: 'integer', list: 'plain' },
   bsd: { header: CmcdHeaderType.Status, type: 'integer', round: 1, list: 'plain' },
-  bsda: { header: CmcdHeaderType.Status, type: 'integer', round: 1, omit: 0, list: 'plain' },
+  bsda: { header: CmcdHeaderType.Status, type: 'integer', round: 1, list: 'plain' },
   cid: { header: CmcdHeaderType.Session, type: 'string', maxLength: 128 },
   d: { header: CmcdHeaderType.Object, type: 'integer', round: 1 },
-  dfa: { header: CmcdHeaderType.Request, type: 'integer', omit: 0 },
+  dfa: { header: CmcdHeaderType.Request, type: 'integer' },
   dl: { header: CmcdHeaderType.Request, type: 'integer', round: 100 },
   ec: { header: CmcdHeaderType.Status, type: 'string', list: 'plain' },
   lb: { header: CmcdHeaderType.Object, type: 'integer', round: 1, list: 'typed' },
@@ -401,17 +362,31 @@ interface CmcdEntry {
 /** Warnings already logged, to log each invalid key or value only once */
 const warnOnce = createWarnOnce();
 
-/** The encoding rules follow the version in `data.v`, v1 if unset. */
+type CmcdMemberEncoder = (
+  key: string,
+  value: CmcdValue,
+  info: CmcdKeyInfo | undefined,
+  data: CmcdData,
+  forHeader: boolean
+) => string | null;
+
+/** Member encoder per version */
+const MEMBER_ENCODERS: { [version: number]: CmcdMemberEncoder } = {
+  [CmcdVersionNumbers.v1]: (key, value, info, _data, forHeader) =>
+    encodeV1Member(key, value as CmcdScalar, info, forHeader),
+  [CmcdVersionNumbers.v2]: (key, value, info, data) => encodeV2Member(key, value, info, data.ot),
+};
+
+/** The encoding rules follow the version in `data.v`, v1 if unset or unknown. */
 function toEntries(data: CmcdData, customKeys: CmcdCustomKey[], forHeader: boolean): CmcdEntry[] {
-  const isV2 = data.v === CmcdVersionNumbers.v2;
-  const keys = isV2 ? CMCD_V2_KEYS : CMCD_V1_KEYS;
+  const version = data.v && CMCD_KEYS[data.v] ? data.v : CmcdVersionNumbers.v1;
+  const keys = CMCD_KEYS[version];
+  const encodeMember = MEMBER_ENCODERS[version];
   const entries: CmcdEntry[] = [];
   const add = (key: string, value: CmcdValue, header: CmcdHeaderType | null, info?: CmcdKeyInfo) => {
     let member: string | null = null;
     try {
-      member = isV2
-        ? encodeV2Member(key, value, info, data.ot)
-        : encodeV1Member(key, value as CmcdScalar, info, forHeader);
+      member = encodeMember(key, value, info, data, forHeader);
     } catch (error) {
       warnOnce(`CMCD: '${key}' is not sent: ${(error as Error).message}`);
     }

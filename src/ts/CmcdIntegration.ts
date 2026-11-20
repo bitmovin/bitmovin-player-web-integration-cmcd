@@ -17,11 +17,11 @@ import {
   HttpResponse,
   HttpResponseBody,
   PlayerAPI,
+  PlayerEvent,
   PlayerEventBase,
   SegmentInfo,
   TimeMode,
   VideoAdaptationData,
-  WarningEvent,
 } from 'bitmovin-player';
 import {
   CMCD_KEYS,
@@ -99,11 +99,20 @@ function appendCmcdQueryArg(url: string, cmcdQueryArg: string): string {
  */
 const RTP_ENCODED_BITRATE_FACTOR = 5;
 
-/** Smallest playhead time in s (2000-01-01) that is taken as wallclock time of a live stream. */
-const MIN_WALLCLOCK_TIME = 946684800;
+/** Maximum number of origins with own `sn`, `bsd` and `ec` state. The least recently used one is dropped. */
+const MAX_TARGETS = 16;
 
 /** Timestamp of an event, or now if the event has none. */
 const eventTime = (event?: PlayerEventBase) => (event && event.timestamp) || Date.now();
+
+/** Request Mode state per report destination (origin) */
+interface CmcdTarget {
+  sequenceNumber: number;
+  /** `bsd` to send with the next request */
+  rebufferingDurations: number[];
+  /** `ec` to send with the next request */
+  errorCodes: string[];
+}
 
 export class CmcdIntegration {
   private sessionId: string;
@@ -122,6 +131,8 @@ export class CmcdIntegration {
   private lastMeasuredThroughputVideo: number;
   private manifestType: CmcdStreamingFormatToken | null;
   private warnOnce = createWarnOnce();
+  /** Player event listeners, to remove them from a replaced player */
+  private listeners: { event: PlayerEvent; callback: (event?: any) => void }[] = [];
 
   // Source state for v2 keys
   /** Time of the first `Play` event of the source, `null` if none yet */
@@ -134,17 +145,17 @@ export class CmcdIntegration {
   private rebufferingStartedAt: number | null;
 
   // Session state for v2 keys, reset on a new session id
-  /** Next `sn` per origin */
-  private sequenceNumbers: { [origin: string]: number };
+  /** State per origin, in order of last use */
+  private targets = new Map<string, CmcdTarget>();
   /** `msd` to send with the next request */
   private pendingStartupDelay: number | null;
   private startupDelaySent: boolean;
   private rebufferingCount: number;
   private rebufferingDuration: number;
-  /** `bsd` to send with the next request */
-  private pendingRebufferingDurations: number[];
-  /** `ec` to send with the next request */
-  private pendingErrorCodes: string[];
+  /** Dropped frames of the previous sources of the session */
+  private droppedFramesOffset = 0;
+  /** Last dropped frames count of the current source */
+  private droppedFrames = 0;
 
   constructor(config: CmcdConfig) {
     this.useQueryArgs = config.useQueryArgs || false;
@@ -171,14 +182,28 @@ export class CmcdIntegration {
   }
 
   public setPlayer(player: PlayerAPI) {
+    // Listeners of a previously set player
+    for (const listener of this.listeners) {
+      this.player?.off(listener.event, listener.callback);
+    }
+    this.listeners = [];
+
     const events = player.exports.PlayerEvent;
+    const on = <T extends PlayerEventBase>(event: PlayerEvent, callback: (event?: T) => void) => {
+      this.listeners.push({ event, callback });
+      player.on(event, callback);
+    };
     const setSeeking = (seeking: boolean) => {
       this.isSeekingOrTimeshiftingOrStartup = seeking;
       this.isSeeking = seeking;
     };
     this.player = player;
-    this.player.on(events.SourceUnloaded, () => this.resetSourceState());
-    this.player.on(events.StallStarted, (event?: PlayerEventBase) => {
+    on(events.SourceUnloaded, () => {
+      this.droppedFramesOffset += this.droppedFrames;
+      this.droppedFrames = 0;
+      this.resetSourceState();
+    });
+    on(events.StallStarted, (event?: PlayerEventBase) => {
       this.stalledSinceLastRequest = true;
       this.isSeekingOrTimeshiftingOrStartup = true;
       // Rebuffering excludes stalls during startup and seeking.
@@ -187,19 +212,19 @@ export class CmcdIntegration {
         this.rebufferingStartedAt = eventTime(event);
       }
     });
-    this.player.on(events.StallEnded, (event?: PlayerEventBase) => {
+    on(events.StallEnded, (event?: PlayerEventBase) => {
       this.isSeekingOrTimeshiftingOrStartup = false;
       if (this.rebufferingStartedAt !== null) {
         const duration = eventTime(event) - this.rebufferingStartedAt;
         this.rebufferingDuration += duration;
         if (this.keys.bsd) {
-          this.pendingRebufferingDurations.push(duration);
+          this.targets.forEach((target) => target.rebufferingDurations.push(duration));
         }
         this.rebufferingStartedAt = null;
       }
     });
     // Startup ends when playback begins. Without this, `su` is sent until the first seek or stall.
-    this.player.on(events.Playing, (event?: PlayerEventBase) => {
+    on(events.Playing, (event?: PlayerEventBase) => {
       this.isSeekingOrTimeshiftingOrStartup = false;
       if (!this.hasStarted) {
         this.hasStarted = true;
@@ -208,29 +233,33 @@ export class CmcdIntegration {
         }
       }
     });
-    this.player.on(events.Seek, () => setSeeking(true));
-    this.player.on(events.Seeked, () => setSeeking(false));
-    this.player.on(events.TimeShift, () => setSeeking(true));
-    this.player.on(events.TimeShifted, () => setSeeking(false));
+    on(events.Seek, () => setSeeking(true));
+    on(events.Seeked, () => setSeeking(false));
+    on(events.TimeShift, () => setSeeking(true));
+    on(events.TimeShifted, () => setSeeking(false));
 
     // Events for v2 keys only
     if (this.keys.sta || this.keys.msd) {
-      // Not fired for `PlaybackConfig.autoplay`
-      this.player.on(events.Play, (event?: PlayerEventBase) => {
+      // Also fired for `PlaybackConfig.autoplay`, which calls `play()`
+      on(events.Play, (event?: PlayerEventBase) => {
         if (!this.hasStarted && this.playRequestedAt === null) {
           this.playRequestedAt = eventTime(event);
         }
       });
     }
     if (this.keys.sta || this.keys.ec) {
-      // `Error` is fatal, `Warning` is not.
-      this.player.on(events.Error, (event: ErrorEvent) => {
+      // Errors are fatal. Warnings are not reported, as their codes overlap with error codes.
+      on(events.Error, (event?: ErrorEvent) => {
         this.hasFatalError = true;
-        this.addErrorCode(event.code);
+        if (this.keys.ec && event) {
+          const errorCode = String(event.code);
+          this.targets.forEach((target) => {
+            if (target.errorCodes.indexOf(errorCode) === -1) {
+              target.errorCodes.push(errorCode);
+            }
+          });
+        }
       });
-    }
-    if (this.keys.ec) {
-      this.player.on(events.Warning, (event: WarningEvent) => this.addErrorCode(event.code));
     }
   }
 
@@ -250,22 +279,21 @@ export class CmcdIntegration {
     this.rebufferingStartedAt = null;
   }
 
-  /** Clears all state that belongs to the previous session id. */
+  /** Clears all state that belongs to the previous session id. Known origins are kept as report destinations. */
   private resetSessionState() {
-    this.sequenceNumbers = {};
+    this.targets.forEach((target) => {
+      target.sequenceNumber = 0;
+      target.rebufferingDurations = [];
+      target.errorCodes = [];
+    });
     this.pendingStartupDelay = null;
     this.startupDelaySent = false;
-    this.rebufferingCount = 0;
+    // An ongoing rebuffering is counted in the new session from now on.
+    this.rebufferingCount = this.rebufferingStartedAt === null ? 0 : 1;
+    this.rebufferingStartedAt = this.rebufferingStartedAt === null ? null : Date.now();
     this.rebufferingDuration = 0;
-    this.pendingRebufferingDurations = [];
-    this.pendingErrorCodes = [];
-  }
-
-  private addErrorCode(code: number) {
-    const errorCode = String(code);
-    if (this.keys.ec && this.pendingErrorCodes.indexOf(errorCode) === -1) {
-      this.pendingErrorCodes.push(errorCode);
-    }
+    // The dropped frames of the current source so far belong to the previous session.
+    this.droppedFramesOffset = -this.droppedFrames;
   }
 
   public onVideoAdaptation = (data: VideoAdaptationData) => {
@@ -279,10 +307,9 @@ export class CmcdIntegration {
   };
 
   public preprocessHttpRequest = (type: HttpRequestType, request: HttpRequest) => {
-    const data = this.gatherCmcdData(type, request);
-
-    // An encoding error must not fail the request, so it is sent without CMCD data.
+    // An error must not fail the request, so it is sent without CMCD data.
     try {
+      const data = this.gatherCmcdData(type, request);
       if (this.useQueryArgs) {
         request.url = appendCmcdQueryArg(request.url, cmcdDataToUrlParameter(data, this.customKeys));
       } else {
@@ -392,9 +419,18 @@ export class CmcdIntegration {
   /** Adds the v2 keys that describe the player and session state. Only keys of the configured version are collected. */
   private addPlayerStateData(data: CmcdData, request: HttpRequest) {
     const player = this.player!;
+    const target = this.getTarget(request.url);
 
     if (this.keys.sn) {
-      data.sn = this.nextSequenceNumber(request.url);
+      data.sn = target.sequenceNumber++;
+    }
+    if (this.keys.bsd && target.rebufferingDurations.length > 0) {
+      data.bsd = target.rebufferingDurations;
+      target.rebufferingDurations = [];
+    }
+    if (this.keys.ec && target.errorCodes.length > 0) {
+      data.ec = target.errorCodes;
+      target.errorCodes = [];
     }
     if (this.keys.sta) {
       data.sta = this.getPlayState();
@@ -411,23 +447,15 @@ export class CmcdIntegration {
     if (this.keys.bsda) {
       data.bsda = this.rebufferingDuration;
     }
-    if (this.keys.bsd && this.pendingRebufferingDurations.length > 0) {
-      data.bsd = this.pendingRebufferingDurations;
-      this.pendingRebufferingDurations = [];
-    }
-    if (this.keys.ec && this.pendingErrorCodes.length > 0) {
-      data.ec = this.pendingErrorCodes;
-      this.pendingErrorCodes = [];
-    }
 
     if (!this.hasStarted) {
       return;
     }
     const isLive = player.isLive();
     if (this.keys.pt) {
-      // Live: absolute time, only if it is a wallclock time. VOD: offset from the start of the asset.
+      // Live: absolute time, which is the wallclock time if the player knows it. VOD: offset from the start of the asset.
       const time = isLive ? player.getCurrentTime() : player.getCurrentTime('relativetime' as TimeMode);
-      if (Number.isFinite(time) && (!isLive || time >= MIN_WALLCLOCK_TIME)) {
+      if (Number.isFinite(time)) {
         data.pt = time * 1000;
       }
     }
@@ -439,17 +467,25 @@ export class CmcdIntegration {
     }
   }
 
-  /** Sequence number per origin, starting at 0 */
-  private nextSequenceNumber(url: string): number {
+  /** State of the report destination (origin) of the URL, marked as most recently used */
+  private getTarget(url: string): CmcdTarget {
     let origin = '';
     try {
       origin = new URL(url).origin;
     } catch {
-      // Counted together with all other invalid URLs
+      // Shared by all invalid URLs
     }
-    const sequenceNumber = this.sequenceNumbers[origin] || 0;
-    this.sequenceNumbers[origin] = sequenceNumber + 1;
-    return sequenceNumber;
+    let target = this.targets.get(origin);
+    if (target) {
+      this.targets.delete(origin);
+    } else {
+      target = { sequenceNumber: 0, rebufferingDurations: [], errorCodes: [] };
+      if (this.targets.size >= MAX_TARGETS) {
+        this.targets.delete(this.targets.keys().next().value);
+      }
+    }
+    this.targets.set(origin, target);
+    return target;
   }
 
   /** Play state as perceived by the user at request time */
@@ -591,9 +627,11 @@ export class CmcdIntegration {
       }
     }
     if (this.keys.dfa && !isAudio) {
+      // The player counts per source, `dfa` since session start.
       const droppedFrames = this.player.getDroppedVideoFrames();
       if (Number.isFinite(droppedFrames)) {
-        data.dfa = droppedFrames;
+        this.droppedFrames = droppedFrames;
+        data.dfa = this.droppedFramesOffset + droppedFrames;
       }
     }
 
