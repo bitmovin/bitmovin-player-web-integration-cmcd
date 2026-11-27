@@ -1,9 +1,12 @@
 /**
- * Enums, keys, classes for CMCD v1.0 support according to CTA-5004.
+ * CMCD data model and encoding, CMCD v1 according to CTA-5004.
  *
  * Limitation:
  * - JSON is not supported, only HTTP Headers and Query Args.
  */
+
+import { quoteString, serializeString, serializeToken } from './StructuredField';
+import { createWarnOnce } from './Log';
 
 export enum CmcdObjectTypeToken {
   AudioOnly = 'a',
@@ -71,500 +74,204 @@ export enum CmcdHeaderType {
   Session = 'CMCD-Session',
 }
 
-type IntegerKbps = number;
-type IntegerMilliSecs = number;
-
-function prepareCmcdData(data: CmcdBase[]): CmcdBase[] {
-  // 9. Key-value pairs SHOULD be sequenced in alphabetical order of the key name in
-  // order to reduce the fingerprinting surface exposed by the player.
-  const sortedData = data.sort((a: CmcdBase, b: CmcdBase) => {
-    return a.key.localeCompare(b.key);
-  });
-
-  // remove empty strings, i.e. keys that should be omitted due to their value (ex: version=1)
-  return sortedData.filter((obj) => obj.keyValuePairToString());
+/**
+ * CMCD data of one request. Values are unrounded and unencoded; the encoder applies the rules of the
+ * key table. `undefined` keys are not sent.
+ */
+export interface CmcdData {
+  /** Encoded bitrate in kbps */
+  br?: number;
+  /** Buffer length in ms */
+  bl?: number;
+  /** Buffer starvation since the prior request */
+  bs?: boolean;
+  /** Content id, max. 64 characters */
+  cid?: string;
+  /** Object duration in ms */
+  d?: number;
+  /** Deadline in ms */
+  dl?: number;
+  /** Measured throughput in kbps */
+  mtp?: number;
+  /** Next object request, path relative to the current request */
+  nor?: string;
+  /** Next range request, e.g. `12323-48763` */
+  nrr?: string;
+  /** Object type */
+  ot?: CmcdObjectTypeToken;
+  /** Playback rate, 0 if not playing */
+  pr?: number;
+  /** Requested maximum throughput in kbps */
+  rtp?: number;
+  /** Streaming format */
+  sf?: CmcdStreamingFormatToken;
+  /** Session id, max. 64 characters */
+  sid?: string;
+  /** Stream type */
+  st?: CmcdStreamTypeToken;
+  /** Startup, seek or recovery after a buffer-empty event */
+  su?: boolean;
+  /** Top bitrate in kbps */
+  tb?: number;
+  /** CMCD version */
+  v?: CmcdVersionNumbers;
 }
 
-export function cmcdDataToHeader(data: CmcdBase[]): CmcdHeaders {
-  const preparedData = prepareCmcdData(data);
+type CmcdValue = string | number | boolean;
 
-  // keys whose values vary with each request.
-  const requestData = preparedData
-    .filter((obj) => obj.type === CmcdHeaderType.Request)
-    .map((obj) => obj.keyValuePairToString())
-    .join(',');
+type CmcdValueType = 'integer' | 'decimal' | 'string' | 'token' | 'boolean';
 
-  // keys whose values vary with the object being requested.
-  const objectData = preparedData
-    .filter((obj) => obj.type === CmcdHeaderType.Object)
-    .map((obj) => obj.keyValuePairToString())
-    .join(',');
+export interface CmcdKeyInfo {
+  header: CmcdHeaderType;
+  type: CmcdValueType;
+  /** Rounds to a multiple of this value */
+  round?: number;
+  /** Value (after rounding) that is not sent */
+  omit?: number | boolean;
+  /** Value is URL encoded before serialization */
+  urlEncode?: boolean;
+}
 
-  // keys whose values do not vary with every request or object.
-  const statusData = preparedData
-    .filter((obj) => obj.type === CmcdHeaderType.Status)
-    .map((obj) => obj.keyValuePairToString())
-    .join(',');
+/** Keys of a CMCD version. Keys without an entry are not sent. */
+export type CmcdKeyTable = { [K in keyof CmcdData]?: CmcdKeyInfo };
 
-  // keys whose values are expected to be invariant over the life of the session.
-  const sessionData = preparedData
-    .filter((obj) => obj.type === CmcdHeaderType.Session)
-    .map((obj) => obj.keyValuePairToString())
-    .join(',');
+export const CMCD_V1_KEYS: CmcdKeyTable = {
+  br: { header: CmcdHeaderType.Object, type: 'integer', round: 1 },
+  bl: { header: CmcdHeaderType.Request, type: 'integer', round: 100 },
+  bs: { header: CmcdHeaderType.Status, type: 'boolean', omit: false },
+  cid: { header: CmcdHeaderType.Session, type: 'string' },
+  d: { header: CmcdHeaderType.Object, type: 'integer', round: 1 },
+  dl: { header: CmcdHeaderType.Request, type: 'integer', round: 100 },
+  // 0 is not a valid measurement, see https://github.com/cta-wave/common-media-client-data/issues/100
+  mtp: { header: CmcdHeaderType.Request, type: 'integer', round: 100, omit: 0 },
+  nor: { header: CmcdHeaderType.Request, type: 'string', urlEncode: true },
+  nrr: { header: CmcdHeaderType.Request, type: 'string' },
+  ot: { header: CmcdHeaderType.Object, type: 'token' },
+  pr: { header: CmcdHeaderType.Session, type: 'decimal', omit: 1 },
+  rtp: { header: CmcdHeaderType.Status, type: 'integer', round: 100, omit: 0 },
+  sf: { header: CmcdHeaderType.Session, type: 'token' },
+  sid: { header: CmcdHeaderType.Session, type: 'string' },
+  st: { header: CmcdHeaderType.Session, type: 'token' },
+  su: { header: CmcdHeaderType.Request, type: 'boolean', omit: false },
+  tb: { header: CmcdHeaderType.Object, type: 'integer', round: 1 },
+  v: { header: CmcdHeaderType.Session, type: 'integer', omit: 1 },
+};
 
+const PRINTABLE_ASCII_REGEX = /^[\x20-\x7e]*$/;
+
+/**
+ * Serializes one v1 key-value pair. Returns `null` if the key is not sent.
+ * Without `info` (custom keys), only the generic rules apply.
+ * `forHeader` rejects keys and strings that are not printable ASCII, as HTTP header values must not contain them.
+ */
+function encodeV1Member(key: string, value: CmcdValue, info?: CmcdKeyInfo, forHeader = false): string | null {
+  if (forHeader && !PRINTABLE_ASCII_REGEX.test(key)) {
+    throw new TypeError(`Not a printable ASCII key: ${key}`);
+  }
+  if (info) {
+    if (info.round) {
+      value = Math.round((value as number) / info.round) * info.round;
+    }
+    if (info.urlEncode) {
+      value = encodeURIComponent(value);
+    }
+    if (value === info.omit) {
+      return null;
+    }
+    if (info.type === 'token') {
+      return `${key}=${serializeToken(value as string)}`;
+    }
+  }
+  if (value === '') {
+    return null;
+  }
+  if (value === true) {
+    return key;
+  }
+  if (typeof value === 'string') {
+    // v1: in query mode, characters outside printable ASCII are sent URL encoded (RFC 8941 rejects them).
+    return `${key}=${forHeader ? serializeString(value) : quoteString(value)}`;
+  }
+  // v1: numbers are sent as JavaScript formats them. RFC 8941 would round decimals to 3 fractional
+  // digits and reject integers beyond ±999,999,999,999,999. `false` is sent as `false`, not `?0`.
+  return `${key}=${value}`;
+}
+
+interface CmcdEntry {
+  key: string;
+  header: CmcdHeaderType | null;
+  member: string;
+}
+
+/** Warnings already logged, to log each invalid key or value only once */
+const warnOnce = createWarnOnce();
+
+function toEntries(data: CmcdData, customKeys: CmcdCustomKey[], forHeader: boolean): CmcdEntry[] {
+  const entries: CmcdEntry[] = [];
+  const add = (key: string, value: CmcdValue, header: CmcdHeaderType | null, info?: CmcdKeyInfo) => {
+    let member: string | null = null;
+    try {
+      member = encodeV1Member(key, value, info, forHeader);
+    } catch (error) {
+      warnOnce(`CMCD: '${key}' is not sent: ${(error as Error).message}`);
+    }
+    if (member !== null) {
+      entries.push({ key, header, member });
+    }
+  };
+
+  for (const key of Object.keys(data) as (keyof CmcdData)[]) {
+    const info = CMCD_V1_KEYS[key];
+    const value = data[key];
+    if (info && value !== undefined && value !== null) {
+      add(key, value, info.header, info);
+    }
+  }
+  for (const customKey of customKeys) {
+    add(customKey.key, customKey.value, customKey.type);
+  }
+
+  // 9. Key-value pairs SHOULD be sequenced in alphabetical order of the key name in
+  // order to reduce the fingerprinting surface exposed by the player.
+  return entries.sort((a, b) => a.key.localeCompare(b.key));
+}
+
+function joinMembers(entries: CmcdEntry[]): string {
+  // 3. Successive key/value pairs MUST be delimited by a comma Unicode 0x2C.
+  return entries.map((entry) => entry.member).join(',');
+}
+
+export function cmcdDataToHeader(data: CmcdData, customKeys: CmcdCustomKey[] = []): CmcdHeaders {
+  const entries = toEntries(data, customKeys, true);
   const headers: CmcdHeaders = {};
-  if (requestData) {
-    headers[CmcdHeaderType.Request] = requestData;
-  }
-  if (objectData) {
-    headers[CmcdHeaderType.Object] = objectData;
-  }
-  if (statusData) {
-    headers[CmcdHeaderType.Status] = statusData;
-  }
-  if (sessionData) {
-    headers[CmcdHeaderType.Session] = sessionData;
+
+  for (const header of [CmcdHeaderType.Request, CmcdHeaderType.Object, CmcdHeaderType.Status, CmcdHeaderType.Session]) {
+    const value = joinMembers(entries.filter((entry) => entry.header === header));
+    if (value) {
+      headers[header] = value;
+    }
   }
 
   // 10. [...]  Data payloads transmitted via headers MUST NOT be URLEncoded.
   return headers;
 }
 
-export function cmcdDataToUrlParameter(data: CmcdBase[]): string {
-  const preparedData = prepareCmcdData(data).map((obj) => obj.keyValuePairToString());
-
-  // 3. Successive key/value pairs MUST be delimited by a comma Unicode 0x2C.
-  const cmcdString = preparedData.join(',');
-
+export function cmcdDataToUrlParameter(data: CmcdData, customKeys: CmcdCustomKey[] = []): string {
   // 10. If the data payload is transmitted as a query argument, then the entire payload
   // string MUST be URLEncoded per [5].
-  return `CMCD=${encodeURIComponent(cmcdString)}`;
+  // Throws a URIError for lone surrogates.
+  return `CMCD=${encodeURIComponent(joinMembers(toEntries(data, customKeys, false)))}`;
 }
 
-export function cmcdDataToJson(data: CmcdBase[]): string {
-  console.error('CMCD JSON format not supported yet', data);
-  throw new Error('ERROR: CMCD JSON format is not supported yet');
-}
-
-/*
- * CMCD keys and details are defined in CTA-5004
- */
-export abstract class CmcdBase {
-  public readonly value: unknown;
-  public abstract readonly key: CmcdKeysToken | string;
-  public abstract readonly type: CmcdHeaderType;
-
-  constructor(value: unknown) {
-    this.value = value;
-  }
-
-  /**
-   * 2. The key and value MUST be separated by an equals sign Unicode 0x3D.
-   *
-   * @returns
-   */
-  keyValuePairToString(): string {
-    if (typeof this.value === 'string') {
-      if (!this.value) {
-        return '';
-      }
-
-      // 7. Any value of type String MUST be enclosed by opening and closing double
-      // quotes Unicode 0x22. Double quotes and backslashes MUST be escaped using a
-      // backslash "\" Unicode 0x5C character. Any value of type Token does not require
-      // quoting.
-      return `${this.key}=${escapeCmcdString(this.value)}`;
-    }
-    if (typeof this.value === 'boolean') {
-      // 2. If the value type is BOOLEAN and the value is TRUE, then the equals sign and the value MUST be omitted.
-      // Boolean keys (`bs`, `su`) MUST NOT be sent if false.
-      return this.value === true ? `${this.key}` : ``;
-    }
-    return `${this.key}=${this.value}`;
-  }
-}
-
-/**
- * The encoded bitrate of the audio or video object
- * being requested. This may not be known precisely
- * by the player; however, it MAY be estimated based
- * upon playlist/manifest declarations. If the playlist
- * declares both peak and average bitrate values, the
- * peak value should be transmitted.
- */
-export class CmcdEncodedBitrate extends CmcdBase {
-  public readonly key = CmcdKeysToken.EncodedBitrate;
-  public readonly type = CmcdHeaderType.Object;
-
-  constructor(value: IntegerKbps) {
-    super(Math.round(value));
-  }
-}
-
-/**
- * The buffer length associated with the media object
- * being requested. This value MUST be rounded to
- * the nearest 100 ms. This key SHOULD only be sent
- * with an object type of ‘a’, ‘v’ or ‘av’.
- */
-export class CmcdBufferLength extends CmcdBase {
-  public readonly key = CmcdKeysToken.BufferLength;
-  public readonly type = CmcdHeaderType.Request;
-
-  constructor(value: IntegerMilliSecs) {
-    super(Math.round(value / 100) * 100);
-  }
-}
-
-/**
- * Key is included without a value if the buffer was
- * starved at some point between the prior request
- * and this object request, resulting in the player
- * being in a rebuffering state and the video or audio
- * playback being stalled. This key MUST NOT be sent
- * if the buffer was not starved since the prior
- * request.
- * If the object type ‘ot’ key is sent along with this
- * key, then the ‘bs’ key refers to the buffer
- * associated with the particular object type. If no
- * object type is communicated, then the buffer state
- * applies to the current session.
- */
-export class CmcdBufferStarvation extends CmcdBase {
-  public readonly key = CmcdKeysToken.BufferStarvation;
-  public readonly type = CmcdHeaderType.Status;
-
-  constructor(value: boolean) {
-    super(value);
-  }
-}
-
-/**
- * A unique string identifying the current content.
- * Maximum length is 64 characters. This value is
- * consistent across multiple different sessions and
- * devices and is defined and updated at the
- * discretion of the service provider.
- */
-export class CmcdContentId extends CmcdBase {
-  public readonly key = CmcdKeysToken.ContentId;
-  public readonly type = CmcdHeaderType.Session;
-
-  constructor(value: string) {
-    super(value);
-  }
-}
-
-/**
- * The playback duration in milliseconds of the object
- * being requested. If a partial segment is being
- * requested, then this value MUST indicate the
- * playback duration of that part and not that of its
- * parent segment. This value can be an
- * approximation of the estimated duration if the
- * explicit value is not known.
- */
-export class CmcdObjectDuration extends CmcdBase {
-  public readonly key = CmcdKeysToken.ObjectDuration;
-  public readonly type = CmcdHeaderType.Object;
-
-  constructor(value: IntegerMilliSecs) {
-    super(Math.round(value));
-  }
-}
-
-/**
- * Deadline from the request time until the first
- * sample of this Segment/Object needs to be
- * available in order to not create a buffer underrun
- * or any other playback problems. This value MUST
- * be rounded to the nearest 100ms. For a playback
- * rate of 1, this may be equivalent to the player’s
- * remaining buffer length.
- */
-export class CmcdDeadline extends CmcdBase {
-  public readonly key = CmcdKeysToken.Deadline;
-  public readonly type = CmcdHeaderType.Request;
-
-  constructor(value: IntegerMilliSecs) {
-    super(Math.round(value / 100) * 100);
-  }
-}
-
-/**
- * The throughput between client and server, as
- * measured by the client and MUST be rounded to
- * the nearest 100 kbps. This value, however derived,
- * SHOULD be the value that the client is using to
- * make its next Adaptive Bitrate switching decision.
- * If the client is connected to multiple servers
- * concurrently, it must take care to report only the
- * throughput measured against the receiving server.
- * If the client has multiple concurrent connections to
- * the server, then the intent is that this value
- * communicates the aggregate throughput the client
- * sees across all those connections.
- */
-export class CmcdMeasuredThroughput extends CmcdBase {
-  public readonly key = CmcdKeysToken.MeasuredThroughput;
-  public readonly type = CmcdHeaderType.Request;
-
-  constructor(value: IntegerKbps) {
-    super(Math.round(value / 100) * 100);
-  }
-
-  // A throughput of 0 is not a valid measurement and MUST NOT be sent.
-  // See https://github.com/cta-wave/common-media-client-data/issues/100
-  override keyValuePairToString() {
-    return this.value === 0 ? `` : super.keyValuePairToString();
-  }
-}
-
-/**
- * Relative path of the next object to be requested.
- * This can be used to trigger pre-fetching by the
- * CDN. This MUST be a path relative to the current
- * request. This string MUST be URLEncoded [5]. The
- * client SHOULD NOT depend upon any pre-fetch
- * action being taken - it is merely a request for such
- * a pre-fetch to take place.
- */
-export class CmcdNextObjectRequest extends CmcdBase {
-  public readonly key = CmcdKeysToken.NextObjectRequest;
-  public readonly type = CmcdHeaderType.Request;
-
-  /**
-   * @param relativePath Unencoded path relative to the current request, e.g. `../300kbps/segment35.m4v`.
-   * It is URL encoded here, independent of the query argument encoding of the whole payload.
-   */
-  constructor(relativePath: string) {
-    super(encodeURIComponent(relativePath));
-  }
-}
-
-/**
- * If the next request will be a partial object request,
- * then this string denotes the byte range to be
- * requested. If the ‘nor’ field is not set, then the
- * object is assumed to match the object currently
- * being requested. The client SHOULD NOT depend
- * upon any pre-fetch action being taken – it is
- * merely a request for such a pre-fetch to take place.
- * Formatting is similar to the HTTP Range header,
- * except that the unit MUST be ‘byte’, the ‘Range:’
- * prefix is NOT required and specifying multiple
- * ranges is NOT allowed. Valid combinations are:
- * - "<range-start>-"
- * - "<range-start>-<range-end>"
- * - "-<suffix-length>"
- */
-export class CmcdNextRangeRequest extends CmcdBase {
-  public readonly key = CmcdKeysToken.NextRangeRequest;
-  public readonly type = CmcdHeaderType.Request;
-
-  constructor(value: string) {
-    super(value);
-  }
-}
-
-/**
- * The media type of the current object being
- * requested:
- * - m = text file, such as a manifest or playlist
- * - a = audio only
- * - v = video only
- * - av = muxed audio and video
- * - i = init segment
- * - c = caption or subtitle
- * - tt = ISOBMFF timed text track
- * - k = cryptographic key, license or certificate.
- * - o = other
- *
- * If the object type being requested is unknown,
- * then this key MUST NOT be used.
- */
-export class CmcdObjectType extends CmcdBase {
-  public readonly key = CmcdKeysToken.ObjectType;
-  public readonly type = CmcdHeaderType.Object;
-
-  constructor(value: CmcdObjectTypeToken) {
-    super(value);
-  }
-
-  override keyValuePairToString() {
-    // otherwise this would be handled as String, but Tokens are different in CMCD
-    return `${this.key}=${this.value}`;
-  }
-}
-
-/**
- * 1 if real-time, 2 if double speed, 0 if not playing.
- * SHOULD only be sent if not equal to 1.
- */
-export class CmcdPlaybackRate extends CmcdBase {
-  public readonly key = CmcdKeysToken.PlaybackRate;
-  public readonly type = CmcdHeaderType.Session;
-
-  constructor(value: number) {
-    super(value);
-  }
-
-  override keyValuePairToString() {
-    if (this.value === 1) {
-      return ``;
-    }
-    return `${this.key}=${this.value}`;
-  }
-}
-
-/**
- * The requested maximum throughput that the
- * client considers sufficient for delivery of the asset.
- * Values MUST be rounded to the nearest 100kbps.
- * For example, a client would indicate that the
- * current segment, encoded at 2Mbps, is to be
- * delivered at no more than 10Mbps, by using
- * rtp=10000.
- * Note: This can benefit clients by preventing buffer
- * saturation through over-delivery and can also
- * deliver a community benefit through fair-share
- * delivery. The concept is that each client receives
- * the throughput necessary for great performance,
- * but no more. The CDN may not support the rtp
- * feature.
- */
-export class CmcdRequestedMaximumThroughput extends CmcdBase {
-  public readonly key = CmcdKeysToken.RequestedMaximumThroughput;
-  public readonly type = CmcdHeaderType.Status;
-
-  constructor(value: IntegerKbps) {
-    super(Math.round(value / 100) * 100);
-  }
-
-  override keyValuePairToString() {
-    return this.value === 0 ? `` : super.keyValuePairToString();
-  }
-}
-
-/**
- * The streaming format that defines the current
- * request.
- * - d = MPEG DASH
- * - h = HTTP Live Streaming (HLS)
- * - s = Smooth Streaming
- * - o = other
- *
- * If the streaming format being requested is
- * unknown, then this key MUST NOT be used.
- */
-export class CmcdStreamingFormat extends CmcdBase {
-  public readonly key = CmcdKeysToken.StreamingFormat;
-  public readonly type = CmcdHeaderType.Session;
-
-  constructor(value: CmcdStreamingFormatToken) {
-    super(value);
-  }
-
-  override keyValuePairToString() {
-    // otherwise this would be handled as String, but Tokens are different in CMCD
-    return `${this.key}=${this.value}`;
-  }
-}
-
-/**
- * A GUID identifying the current playback session. A
- * playback session typically ties together segments
- * belonging to a single media asset. Maximum length
- * is 64 characters. It is RECOMMENDED to conform
- * to the UUID specification [7].
- */
-export class CmcdSessionId extends CmcdBase {
-  public readonly key = CmcdKeysToken.SessionId;
-  public readonly type = CmcdHeaderType.Session;
-
-  constructor(value: string) {
-    super(value);
-  }
-}
-
-/**
- * - v = all segments are available – e.g., VOD
- * - l = segments become available over time – e.g.,
- * LIVE
- */
-export class CmcdStreamType extends CmcdBase {
-  public readonly key = CmcdKeysToken.StreamType;
-  public readonly type = CmcdHeaderType.Session;
-
-  constructor(value: CmcdStreamTypeToken) {
-    super(value);
-  }
-
-  override keyValuePairToString() {
-    // otherwise this would be handled as String, but Tokens are different in CMCD
-    return `${this.key}=${this.value}`;
-  }
-}
-
-/**
- * Key is included without a value if the object is
- * needed urgently due to startup, seeking or
- * recovery after a buffer-empty event. The media
- * SHOULD not be rendering when this request is
- * made. This key MUST not be sent if it is FALSE.
- */
-export class CmcdStartup extends CmcdBase {
-  public readonly key = CmcdKeysToken.Startup;
-  public readonly type = CmcdHeaderType.Request;
-
-  constructor(value: boolean) {
-    super(value);
-  }
-}
-
-/**
- * The highest bitrate rendition in the manifest or
- * playlist that the client is allowed to play, given
- * current codec, licensing and sizing constraints.
- */
-export class CmcdTopBitrate extends CmcdBase {
-  public readonly key = CmcdKeysToken.TopBitrate;
-  public readonly type = CmcdHeaderType.Object;
-
-  constructor(value: IntegerKbps) {
-    super(Math.round(value));
-  }
-}
-
-/**
- * The version of this specification used for
- * interpreting the defined key names and values. If
- * this key is omitted, the client and server MUST
- * interpret the values as being defined by version 1.
- * Client SHOULD omit this field if the version is 1.
- */
-export class CmcdVersion extends CmcdBase {
-  public readonly key = CmcdKeysToken.CmcdVersion;
-  public readonly type = CmcdHeaderType.Session;
-
-  constructor(value: CmcdVersionNumbers) {
-    super(value);
-  }
-
-  override keyValuePairToString() {
-    return this.value === CmcdVersionNumbers.v1 ? `` : `${this.key}=${this.value}`;
-  }
-}
-
-export class CmcdCustomKey extends CmcdBase {
+export class CmcdCustomKey {
   public readonly key: string;
+  public readonly value: string | number;
 
-  // Header type must be set if HTTP header mode is used (`CmcdConfig.useQueryArgs = false`)
+  // Header type must be set if HTTP header mode is used (`CmcdConfig.useQueryArgs = false`).
+  // `null` if not set or invalid.
   public readonly type: CmcdHeaderType;
 
   constructor(key: string, value: string | number, headerType?: CmcdHeaderType) {
-    super(value);
-
     /**
      * Custom key names
      * may be used, but they MUST carry a hyphenated prefix to ensure that there will
@@ -576,23 +283,17 @@ export class CmcdCustomKey extends CmcdBase {
       throw new Error('Custom key names MUST carry a hyphenated prefix (and SHOULD use a reverse-DNS syntax)');
     }
 
+    // v1: key names are not checked against RFC 8941, which only allows lowercase.
     this.key = key;
+    this.value = value;
     this.type = Object.values(CmcdHeaderType).includes(headerType) ? headerType : null;
   }
-}
 
-/**
- * 7. Any value of type String MUST be enclosed by opening and closing double
- * quotes Unicode 0x22. Double quotes and backslashes MUST be escaped using a
- * backslash "\" Unicode 0x5C character. Any value of type Token does not require
- * quoting.
- *
- * @param str
- * @returns
- */
-function escapeCmcdString(str: string) {
-  const doubleQuotesRegex = /"/g;
-  const backslashRegex = /\\/g;
-
-  return `"${str.replace(backslashRegex, '\\\\').replace(doubleQuotesRegex, '\\"')}"`;
+  /**
+   * @deprecated Will be removed. Encoding is done for all keys of a request at once.
+   * @returns The CMCD v1 key-value pair, or an empty string if the key is not sent.
+   */
+  keyValuePairToString(): string {
+    return encodeV1Member(this.key, this.value) || '';
+  }
 }

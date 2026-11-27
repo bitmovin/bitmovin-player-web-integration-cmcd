@@ -6,11 +6,16 @@ The format is based on [Keep a Changelog](http://keepachangelog.com/)
 and this project adheres to [Semantic Versioning](http://semver.org/).
 
 ## [Unreleased]
+### Deprecated
+- `CustomKey.keyValuePairToString`. Encoding is done for all keys of a request at once.
+
 ### Fixed
 - Encoded bitrate (`br`), object duration (`d`) and top bitrate (`tb`) were not rounded and could be sent as non-integers, e.g. `d=4003.9999999999995`. They are now rounded to integers.
 - Content id (`cid`) and session id (`sid`) longer than 64 characters were sent. They are now omitted (with a console warning, once per value) instead of violating the maximum length of CMCD v1.
 - Buffer starvation (`bs`) could be encoded as `bs=false`. It is now omitted if `false`.
 - `preprocessHttpResponse` threw if the player passed no response (e.g. after a network error), which could prevent the request from being retried. A missing response is now passed on unchanged.
+- `preprocessHttpRequest` could throw for values that cannot be encoded, e.g. a lone surrogate in a content id in query mode. The request is now sent without CMCD data and a console warning is logged.
+- In HTTP header mode, string values and custom key names that are not printable ASCII (e.g. line breaks or `é`) were sent in the CMCD headers. Such keys are now omitted with a console warning.
 
 ## [0.6.1] - 2026-11-20
 ### Fixed
