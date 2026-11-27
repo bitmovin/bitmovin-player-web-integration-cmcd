@@ -112,7 +112,7 @@ export enum CmcdHeaderType {
  * CMCD v1 data of one request. Values are unrounded and unencoded; the encoder applies the rules of the
  * key table. `undefined` keys are not sent.
  */
-export interface CmcdData {
+export interface CmcdDataV1 {
   /** Encoded bitrate in kbps */
   br?: CmcdListValue;
   /** Buffer length in ms */
@@ -152,7 +152,7 @@ export interface CmcdData {
 }
 
 /** CMCD v2 Request Mode data: the v1 keys and the keys added in v2. `nrr` is not sent in v2. */
-export interface CmcdDataV2 extends CmcdData {
+export interface CmcdDataV2 extends CmcdDataV1 {
   /** Backgrounded: the page is hidden */
   bg?: boolean;
   /** Buffer starvation count since session start */
@@ -241,12 +241,12 @@ export interface CmcdKeyInfo {
 /** `cid` and `sid` need a maximum length in every version. */
 type CmcdIdKeyInfo = CmcdKeyInfo & { maxLength: number };
 
-export type CmcdKeyTable<T extends CmcdData = CmcdEventData> = { [K in keyof T]?: CmcdKeyInfo } & {
+export type CmcdKeyTable<T extends CmcdDataV1 = CmcdEventData> = { [K in keyof T]?: CmcdKeyInfo } & {
   cid: CmcdIdKeyInfo;
   sid: CmcdIdKeyInfo;
 };
 
-export const CMCD_V1_KEYS: CmcdKeyTable<CmcdData> = {
+export const CMCD_V1_KEYS: CmcdKeyTable<CmcdDataV1> = {
   br: { header: CmcdHeaderType.Object, type: 'integer', round: 1 },
   bl: { header: CmcdHeaderType.Request, type: 'integer', round: 100 },
   bs: { header: CmcdHeaderType.Status, type: 'boolean', omit: false },

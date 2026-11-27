@@ -1,7 +1,7 @@
 import { describe, beforeEach, afterEach, it, expect, jest } from '@jest/globals';
 import { HttpRequest, HttpRequestMethod, HttpRequestType, HttpResponseType, PlayerAPI } from 'bitmovin-player';
 import { CmcdIntegration, CmcdConfig } from '../../src/ts/CmcdIntegration';
-import { CmcdCustomKey, CmcdData, cmcdDataToHeader, cmcdDataToUrlParameter, CmcdHeaderType } from '../../src/ts/Cmcd';
+import { CmcdCustomKey, CmcdDataV1, cmcdDataToHeader, cmcdDataToUrlParameter, CmcdHeaderType } from '../../src/ts/Cmcd';
 
 // Jest Mocking for helper functions
 jest.mock('../../src/ts/Cmcd', () => {
@@ -16,7 +16,7 @@ jest.mock('../../src/ts/Cmcd', () => {
 const actualCmcd = jest.requireActual<typeof import('../../src/ts/Cmcd')>('../../src/ts/Cmcd');
 
 /** CMCD data passed to the encoder by the last request in query mode. */
-const lastCmcdData = () => (cmcdDataToUrlParameter as jest.Mock).mock.calls.at(-1)?.[0] as CmcdData;
+const lastCmcdData = () => (cmcdDataToUrlParameter as jest.Mock).mock.calls.at(-1)?.[0] as CmcdDataV1;
 
 describe('CmcdIntegration', () => {
   let cmcdIntegration: CmcdIntegration;
@@ -342,7 +342,7 @@ describe('CmcdIntegration', () => {
       // Encoded key-value pair per key, e.g. `{ d: 'd=4000' }`
       const data = lastCmcdData();
       return Object.fromEntries(
-        (Object.keys(data) as (keyof CmcdData)[]).map((key) => [
+        (Object.keys(data) as (keyof CmcdDataV1)[]).map((key) => [
           key,
           Object.values(actualCmcd.cmcdDataToHeader({ [key]: data[key] })).join(),
         ])
@@ -534,7 +534,7 @@ describe('CmcdIntegration', () => {
         headers: {},
       });
       const data = lastCmcdData();
-      return (Object.keys(data) as (keyof CmcdData)[]).filter((key) => data[key] !== undefined);
+      return (Object.keys(data) as (keyof CmcdDataV1)[]).filter((key) => data[key] !== undefined);
     };
 
     beforeEach(() => {
