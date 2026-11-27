@@ -26,7 +26,7 @@ import {
 import {
   CMCD_KEYS,
   CmcdCustomKey,
-  CmcdData,
+  CmcdDataV2,
   cmcdDataToHeader,
   cmcdDataToUrlParameter,
   CmcdKeyTable,
@@ -370,12 +370,12 @@ export class CmcdIntegration {
     this.contentId = id;
   }
 
-  private gatherCmcdData(type: HttpRequestType, request: HttpRequest): CmcdData {
+  private gatherCmcdData(type: HttpRequestType, request: HttpRequest): CmcdDataV2 {
     if (!this.player) {
       throw new Error('Bitmovin Player not provided!');
     }
 
-    const data: CmcdData = {
+    const data: CmcdDataV2 = {
       v: this.version,
       st: this.player.isLive() ? CmcdStreamTypeToken.Live : CmcdStreamTypeToken.Vod,
       // 0 before the first play and while paused
@@ -426,7 +426,7 @@ export class CmcdIntegration {
   }
 
   /** Adds the v2 keys that describe the player and session state. Only keys of the configured version are collected. */
-  private addPlayerStateData(data: CmcdData, request: HttpRequest) {
+  private addPlayerStateData(data: CmcdDataV2, request: HttpRequest) {
     const player = this.player!;
     const target = this.targets.get(request.url);
 
@@ -573,7 +573,7 @@ export class CmcdIntegration {
     }
   }
 
-  private addSegmentRequestSpecificData(data: CmcdData, request: HttpRequest, mediaType: 'audio' | 'video') {
+  private addSegmentRequestSpecificData(data: CmcdDataV2, request: HttpRequest, mediaType: 'audio' | 'video') {
     if (!this.player) {
       return;
     }
@@ -646,7 +646,7 @@ export class CmcdIntegration {
     }
   }
 
-  private addNextObjectAndObjectDuration(data: CmcdData, segments: SegmentInfo[], requestUrl: string) {
+  private addNextObjectAndObjectDuration(data: CmcdDataV2, segments: SegmentInfo[], requestUrl: string) {
     const currentSegmentIndex = segments.findIndex((value) => value.url === requestUrl);
     if (currentSegmentIndex > -1) {
       const currentSegment = segments[currentSegmentIndex];

@@ -82,7 +82,7 @@ export enum CmcdHeaderType {
 }
 
 /**
- * CMCD data of one request. Values are unrounded and unencoded; the encoder applies the rules of the
+ * CMCD v1 data of one request. Values are unrounded and unencoded; the encoder applies the rules of the
  * key table. `undefined` keys are not sent.
  */
 export interface CmcdData {
@@ -122,8 +122,10 @@ export interface CmcdData {
   tb?: number;
   /** CMCD version */
   v?: CmcdVersionNumbers;
+}
 
-  // v2 only
+/** CMCD v2 Request Mode data: the v1 keys and the keys added in v2. `nrr` is not sent in v2. */
+export interface CmcdDataV2 extends CmcdData {
   /** Backgrounded: the page is hidden */
   bg?: boolean;
   /** Buffer starvation count since session start */
@@ -183,9 +185,12 @@ export interface CmcdKeyInfo {
 /** `cid` and `sid` need a maximum length in every version. */
 type CmcdIdKeyInfo = CmcdKeyInfo & { maxLength: number };
 
-export type CmcdKeyTable = { [K in keyof CmcdData]?: CmcdKeyInfo } & { cid: CmcdIdKeyInfo; sid: CmcdIdKeyInfo };
+export type CmcdKeyTable<T extends CmcdData = CmcdDataV2> = { [K in keyof T]?: CmcdKeyInfo } & {
+  cid: CmcdIdKeyInfo;
+  sid: CmcdIdKeyInfo;
+};
 
-export const CMCD_V1_KEYS: CmcdKeyTable = {
+export const CMCD_V1_KEYS: CmcdKeyTable<CmcdData> = {
   br: { header: CmcdHeaderType.Object, type: 'integer', round: 1 },
   bl: { header: CmcdHeaderType.Request, type: 'integer', round: 100 },
   bs: { header: CmcdHeaderType.Status, type: 'boolean', omit: false },
@@ -214,7 +219,7 @@ export const CMCD_V1_KEYS: CmcdKeyTable = {
  * Object type parameter (`;v`, `;a`): added to bitrate keys of the requested object (`br`, `lb`, `pb`, `tb`).
  * Not added to `bl`, `mtp` and `tbl`, as in the spec examples, nor to the stall keys, as the cause of a stall is unknown.
  */
-export const CMCD_V2_KEYS: CmcdKeyTable = {
+export const CMCD_V2_KEYS: CmcdKeyTable<CmcdDataV2> = {
   bl: { header: CmcdHeaderType.Request, type: 'integer', round: 100, list: 'plain' },
   br: { header: CmcdHeaderType.Object, type: 'integer', round: 1, list: 'typed' },
   bg: { header: CmcdHeaderType.Status, type: 'boolean', omit: false },
@@ -371,7 +376,7 @@ type CmcdMemberEncoder = (
   key: string,
   value: CmcdValue,
   info: CmcdKeyInfo | undefined,
-  data: CmcdData,
+  data: CmcdDataV2,
   forHeader: boolean
 ) => string | null;
 
@@ -383,7 +388,7 @@ const MEMBER_ENCODERS: { [version: number]: CmcdMemberEncoder } = {
 };
 
 /** The encoding rules follow the version in `data.v`, v1 if unset or unknown. */
-function toEntries(data: CmcdData, customKeys: CmcdCustomKey[], forHeader: boolean): CmcdEntry[] {
+function toEntries(data: CmcdDataV2, customKeys: CmcdCustomKey[], forHeader: boolean): CmcdEntry[] {
   const version = data.v && CMCD_KEYS[data.v] ? data.v : CmcdVersionNumbers.v1;
   const keys = CMCD_KEYS[version];
   const encodeMember = MEMBER_ENCODERS[version];
@@ -400,7 +405,7 @@ function toEntries(data: CmcdData, customKeys: CmcdCustomKey[], forHeader: boole
     }
   };
 
-  for (const key of Object.keys(data) as (keyof CmcdData)[]) {
+  for (const key of Object.keys(data) as (keyof CmcdDataV2)[]) {
     const info = keys[key];
     const value = data[key];
     if (info && value !== undefined && value !== null) {
@@ -421,7 +426,7 @@ function joinMembers(entries: CmcdEntry[]): string {
   return entries.map((entry) => entry.member).join(',');
 }
 
-export function cmcdDataToHeader(data: CmcdData, customKeys: CmcdCustomKey[] = []): CmcdHeaders {
+export function cmcdDataToHeader(data: CmcdDataV2, customKeys: CmcdCustomKey[] = []): CmcdHeaders {
   const entries = toEntries(data, customKeys, true);
   const headers: CmcdHeaders = {};
 
@@ -436,7 +441,7 @@ export function cmcdDataToHeader(data: CmcdData, customKeys: CmcdCustomKey[] = [
   return headers;
 }
 
-export function cmcdDataToUrlParameter(data: CmcdData, customKeys: CmcdCustomKey[] = []): string {
+export function cmcdDataToUrlParameter(data: CmcdDataV2, customKeys: CmcdCustomKey[] = []): string {
   // 10. If the data payload is transmitted as a query argument, then the entire payload
   // string MUST be URLEncoded per [5].
   // Throws a URIError for lone surrogates.
