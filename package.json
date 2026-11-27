@@ -1,6 +1,6 @@
 {
   "name": "@bitmovin/player-web-integration-cmcd",
-  "version": "0.6.1",
+  "version": "0.6.2",
   "description": "CMCD (CTA-5004) integration for the Bitmovin Player",
   "types": "dist/js/CmcdIntegration.d.ts",
   "browser": "dist/js/bitmovin-player-integration-cmcd.js",
