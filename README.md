@@ -137,7 +137,7 @@ Settings per target:
 | --- | --- | --- |
 | `url` | required | Endpoint. The reports are sent with `fetch`, `Content-Type: application/cmcd`. |
 | `events` | `ps`, `e`, `t`, `rr` | Events to report |
-| `keys` | all | Keys to send. `e`, `ts`, `v`, `sid`, `cid` and the key that the event requires (`sta` for `ps`, `ec` for `e`, `cen` for `ce`, `url` for `rr`, `h` for `h`) are always sent. |
+| `keys` | all | Keys to send. `e`, `ts`, `v`, `sid`, `cid` and the key that the event requires (`sta` for `ps`, `ec` for `e`, `cen` for `ce`, `url` for `rr`, `h` for `h`, `pr` for `pr`) are always sent. |
 | `intervalMs` | `30000` | Interval of `t` reports and of sending batched reports, while a source is loaded. Values from 1 to 999 are raised to 1000. `0` disables both. |
 | `batchSize` | `1` | Number of reports per request |
 | `authorization` | none | Value of the `Authorization` header |
@@ -156,6 +156,8 @@ Events:
 | `c` | `setContentId` with a different id |
 | `h` | Hostname of manifest or media requests changed (not for the first one) |
 | `m`, `um` | `Muted`, `Unmuted`. Also sent when the player or the application mutes, not only for user actions. |
+| `pr` | `PlaybackSpeedChanged` while playing (`sta=p`), with the new rate in `pr` (omitted for 1.0). The spec does not recommend it if the rate changes often, e.g. with low-latency catch-up. |
+| `pc`, `pe` | `ViewModeChanged` to a smaller or larger view mode (picture-in-picture < inline < fullscreen), e.g. `pe` when entering and `pc` when leaving fullscreen. Size changes of the player container (`PlayerResized`) are not reported. |
 | `bc` | `VideoDownloadQualityChanged`/`AudioDownloadQualityChanged` (not for the first quality of a source) |
 | `abs`, `abe`, `as`, `ae`, `sk` | `AdBreakStarted`, `AdBreakFinished`, `AdStarted`, `AdFinished`/`AdError`/`AdSkipped`, `AdSkipped`. `ae` and `abe` are only sent after `as` and `abs`. The application sets `cid` during ads with `setContentId`; `nr` is not sent. |
 | `ce` | `cmcdIntegration.sendCustomEvent(name, customKeys?)`, with `cen` of up to 64 characters |
@@ -180,8 +182,6 @@ Notes:
 - `cmsdd`/`cmsds` need `Access-Control-Expose-Headers` for the CMSD headers on cross-origin media responses, and `Retry-After` needs it on cross-origin endpoint responses.
 
 Not implemented in Event Mode:
-- `pc`/`pe` (player collapse/expand): no reliable source for a user action
-- `pr` as event (playback rate change)
 - `ttfbb` (the player does not measure the first body byte), `smrt`, `nor`, `su`, `nr`, `tpb`
 
 ## Setup for Development

@@ -54,7 +54,7 @@ const MIN_INTERVAL_MS = 1000;
 /** Sent in all reports, independent of the key filter */
 const MANDATORY_KEYS = ['e', 'ts', 'v', 'sid', 'cid'];
 /** Key that an event type requires, independent of the key filter */
-const EVENT_REQUIRED_KEY: { [event: string]: string } = { ps: 'sta', e: 'ec', ce: 'cen', rr: 'url', h: 'h' };
+const EVENT_REQUIRED_KEY: { [event: string]: string } = { ps: 'sta', e: 'ec', ce: 'cen', rr: 'url', h: 'h', pr: 'pr' };
 
 /** Maximum number of queued records. The oldest record is dropped. */
 export const MAX_QUEUED_RECORDS = 200;

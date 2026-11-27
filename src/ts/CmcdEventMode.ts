@@ -12,7 +12,9 @@ import {
   PlayerAPI,
   PlayerEvent,
   PlayerEventBase,
+  PlaybackSpeedChangedEvent,
   VideoDownloadQualityChangedEvent,
+  ViewModeChangedEvent,
 } from 'bitmovin-player';
 import {
   CmcdCustomKey,
@@ -173,6 +175,25 @@ export class CmcdEventMode {
     });
     on(events.Muted, report('m'));
     on(events.Unmuted, report('um'));
+    // Only while playing, as the spec requires
+    on(events.PlaybackSpeedChanged, (event?: PlaybackSpeedChangedEvent) => {
+      if (event && this.playState === CmcdPlayStateToken.Playing) {
+        this.report('pr', this.timeOf(event), { pr: event.to });
+      }
+    });
+
+    // `pc`/`pe`: the view mode controls make the player smaller or larger.
+    const viewModes = player.exports.ViewMode;
+    const viewModeSizes: { [viewMode: string]: number } = viewModes
+      ? { [viewModes.PictureInPicture]: 0, [viewModes.Inline]: 1, [viewModes.Fullscreen]: 2 }
+      : {};
+    on(events.ViewModeChanged, (event?: ViewModeChangedEvent) => {
+      const from = event ? viewModeSizes[event.from] : undefined;
+      const to = event ? viewModeSizes[event.to] : undefined;
+      if (from !== undefined && to !== undefined && from !== to) {
+        this.report(to > from ? 'pe' : 'pc', this.timeOf(event));
+      }
+    });
 
     const onDownloadQualityChanged =
       (mediaType: 'audio' | 'video') =>

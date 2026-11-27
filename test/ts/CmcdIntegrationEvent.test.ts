@@ -40,6 +40,8 @@ const PLAYER_EVENTS: Record<string, string> = {
   Error: 'error',
   Muted: 'muted',
   Unmuted: 'unmuted',
+  PlaybackSpeedChanged: 'playbackspeedchanged',
+  ViewModeChanged: 'viewmodechanged',
   VideoDownloadQualityChanged: 'videodownloadqualitychanged',
   AudioDownloadQualityChanged: 'audiodownloadqualitychanged',
   AdBreakStarted: 'adbreakstarted',
@@ -189,6 +191,7 @@ describe('CmcdIntegration Event Mode', () => {
         PlayerEvent: PLAYER_EVENTS,
         BufferType: { ForwardDuration: 'forwardduration' },
         MediaType: { Audio: 'audio', Video: 'video' },
+        ViewMode: { Inline: 'inline', Fullscreen: 'fullscreen', PictureInPicture: 'pictureinpicture' },
       },
     } as unknown as PlayerAPI;
   });
@@ -451,6 +454,39 @@ describe('CmcdIntegration Event Mode', () => {
       emit('muted');
       emit('unmuted');
       expect((await parsedTo()).map((record) => record.e)).toEqual(['m', 'um']);
+    });
+
+    it('pr: reports playback rate changes while playing only', async () => {
+      integration = create([{ url: COLLECTOR, events: ['pr'], keys: [] }]);
+      emit('sourceloaded');
+      emit('playbackspeedchanged', { from: 1, to: 2 });
+      startPlayback();
+      emit('playbackspeedchanged', { from: 1, to: 1.5 });
+      emit('playbackspeedchanged', { from: 1.5, to: 1 });
+      state.playing = false;
+      state.paused = true;
+      emit('paused');
+      emit('playbackspeedchanged', { from: 1, to: 2 });
+
+      const records = await parsedTo();
+      expect(records.map((record) => record.e)).toEqual(['pr', 'pr']);
+      // 1.0 is not sent
+      expect(records.map((record) => record.pr)).toEqual(['1.5', undefined]);
+    });
+
+    it('pc, pe: reports view mode changes to a smaller or larger mode', async () => {
+      integration = create([{ url: COLLECTOR, events: ['pc', 'pe'], keys: [] }]);
+      const change = (from: string, to: string) => emit('viewmodechanged', { from, to });
+      change('inline', 'fullscreen');
+      change('fullscreen', 'inline');
+      change('inline', 'pictureinpicture');
+      change('pictureinpicture', 'inline');
+      change('pictureinpicture', 'fullscreen');
+      change('fullscreen', 'pictureinpicture');
+      change('inline', 'inline');
+      change('inline', 'unknown');
+
+      expect((await parsedTo()).map((record) => record.e)).toEqual(['pe', 'pc', 'pc', 'pe', 'pe', 'pc']);
     });
 
     it('bc: reports download quality changes, not the first quality', async () => {
