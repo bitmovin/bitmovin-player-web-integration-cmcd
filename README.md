@@ -1,6 +1,6 @@
 # Bitmovin Player CMCD Integration
 
-This project adds support for the Common Media Client Data (CMCD) plugin. Please find more information about the Consumer Technology Association (CTA) Specification in https://cdn.cta.tech/cta/media/media/resources/standards/pdfs/cta-5004-final.pdf
+This project adds support for the Common Media Client Data (CMCD) plugin. It implements CMCD v1 as defined in the Consumer Technology Association (CTA) specification CTA-5004. The latest edition of the specification is published at https://cta-wave.github.io/Resources/common-media-client-data--cta-5004-b.html
 
 ## Install
 Install with npm:
@@ -57,7 +57,7 @@ player.load(source);
 
 ## CMCD v2
 
-CMCD v1 is the default. To send CMCD v2 (CTA-5004-A) Request Mode data, set `version: 2`:
+CMCD v1 is the default. To send CMCD v2 (CTA-5004-B) Request Mode data, set `version: 2`:
 
 ```ts
 const cmcdConfig: CmcdConfig = {
@@ -111,7 +111,7 @@ Not implemented:
 
 ## CMCD v2 Event Mode
 
-Event Mode sends reports at player events to one or more endpoints of your choice, as `text/cmcd` HTTP POST body. It is opt-in and independent of Request Mode. It always uses v2 syntax, also if Request Mode uses v1 (`version` unset or 1).
+Event Mode sends reports at player events to one or more endpoints of your choice, as `application/cmcd` HTTP POST body. It is opt-in and independent of Request Mode. It always uses v2 syntax, also if Request Mode uses v1 (`version` unset or 1).
 
 ```ts
 const cmcdConfig: CmcdConfig = {
@@ -134,7 +134,7 @@ Settings per target:
 
 | Setting | Default | Description |
 | --- | --- | --- |
-| `url` | required | Endpoint. The reports are sent with `fetch`, `Content-Type: text/cmcd`. |
+| `url` | required | Endpoint. The reports are sent with `fetch`, `Content-Type: application/cmcd`. |
 | `events` | `ps`, `e`, `t`, `rr` | Events to report |
 | `keys` | all | Keys to send. `e`, `ts`, `v`, `sid`, `cid` and the key that the event requires (`sta` for `ps`, `ec` for `e`, `cen` for `ce`, `url` for `rr`, `h` for `h`) are always sent. |
 | `intervalMs` | `30000` | Interval of `t` reports and of sending batched reports, while a source is loaded. Values from 1 to 999 are raised to 1000. `0` disables both. |
@@ -174,7 +174,7 @@ Transport per target:
 Notes:
 - Privacy: `url` can contain personal data or access tokens. By default, query and fragment are removed. Use `urlFilter` to send less (`origin`) or more (`full`).
 - Request volume: with `rr` and the default `batchSize` of 1, each media request causes one report request. Use a larger `batchSize`, or remove `rr` from `events`.
-- The endpoint must allow CORS for `POST` with the headers `Content-Type` and (if used) `Authorization`, as `text/cmcd` causes a preflight request.
+- The endpoint must allow CORS for `POST` with the headers `Content-Type` and (if used) `Authorization`, as `application/cmcd` causes a preflight request.
 - `cmsdd`/`cmsds` need `Access-Control-Expose-Headers` for the CMSD headers on cross-origin media responses, and `Retry-After` needs it on cross-origin endpoint responses.
 
 Not implemented in Event Mode:

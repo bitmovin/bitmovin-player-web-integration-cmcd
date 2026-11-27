@@ -1,10 +1,9 @@
 /**
- * CMCD data model and encoding, CMCD v1 according to
- * https://cdn.cta.tech/cta/media/media/resources/standards/pdfs/cta-5004-final.pdf
- * and CMCD v2 (CTA-5004-A) Request Mode and Event Mode.
+ * CMCD data model and encoding, CMCD v1 according to CTA-5004
+ * and CMCD v2 (CTA-5004-B) Request Mode and Event Mode.
  *
  * Limitation:
- * - JSON is not supported, only HTTP Headers, Query Args and (Event Mode) the `text/cmcd` body.
+ * - JSON is not supported, only HTTP Headers, Query Args and (Event Mode) the `application/cmcd` body.
  */
 
 import {
@@ -524,14 +523,14 @@ export function cmcdDataToUrlParameter(data: CmcdData, customKeys: CmcdCustomKey
 }
 
 /**
- * v2 Event Mode: one record of a `text/cmcd` body. As a query argument payload, but not URL encoded.
- * Always v2 (CTA-5004-A 5.2), also if Request Mode uses v1.
+ * v2 Event Mode: one record of an `application/cmcd` body. As a query argument payload, but not URL encoded.
+ * Always v2 (CTA-5004-B 5.2), also if Request Mode uses v1.
  */
 export function cmcdDataToEventRecord(data: CmcdData, customKeys: CmcdCustomKey[] = []): string {
   return joinMembers(toEntries(Object.assign({}, data, { v: CmcdVersionNumbers.v2 }), customKeys, false, true));
 }
 
-/** v2 Event Mode: `text/cmcd` body of the records, separated by LF without a trailing LF */
+/** v2 Event Mode: `application/cmcd` body of the records, separated by LF without a trailing LF */
 export function cmcdEventRecordsToBody(records: string[]): string {
   return records.join('\n');
 }

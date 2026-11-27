@@ -32,7 +32,7 @@ describe('CMCD v2 Event Mode encoding', () => {
     warnSpy.mockRestore();
   });
 
-  // CTA-5004-A section 8.2 and 8.3. Line breaks and spaces of the spec text are removed.
+  // CTA-5004-B section 8.2 and 8.3. Line breaks and spaces of the spec text are removed.
   describe('spec examples', () => {
     it('8.2.1 time interval with the minimal keys', () => {
       expect(cmcdDataToEventRecord({ e: 't', ts: 1764752400000, v })).toEqual('e=t,ts=1764752400000,v=2');

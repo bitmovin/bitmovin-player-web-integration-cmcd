@@ -56,13 +56,13 @@ describe('CmcdEventReporter', () => {
     Object.defineProperty(navigator, 'onLine', { value: true, configurable: true });
   });
 
-  it('sends a POST with text/cmcd and the Authorization header', () => {
+  it('sends a POST with application/cmcd and the Authorization header', () => {
     add(create({ authorization: 'Bearer abc' }), 'a');
     expect(fetchMock).toHaveBeenCalledWith(
       URL,
       expect.objectContaining({
         method: 'POST',
-        headers: { 'Content-Type': 'text/cmcd', Authorization: 'Bearer abc' },
+        headers: { 'Content-Type': 'application/cmcd', Authorization: 'Bearer abc' },
         body: record('a'),
         keepalive: false,
       })
@@ -71,7 +71,7 @@ describe('CmcdEventReporter', () => {
 
   it('omits the Authorization header if not configured', () => {
     add(create(), 'a');
-    expect(fetchMock.mock.calls[0][1].headers).toEqual({ 'Content-Type': 'text/cmcd' });
+    expect(fetchMock.mock.calls[0][1].headers).toEqual({ 'Content-Type': 'application/cmcd' });
   });
 
   it('sends when the batch size is reached, and the rest on flush', () => {

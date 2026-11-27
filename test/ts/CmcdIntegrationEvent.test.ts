@@ -920,7 +920,7 @@ describe('CmcdIntegration Event Mode', () => {
     });
   });
 
-  // CTA-5004-A section 8.2, reproduced from player events
+  // CTA-5004-B section 8.2, reproduced from player events
   describe('spec examples', () => {
     const ids = { sessionId: 'session-id-123', contentId: 'content-id-123' };
 

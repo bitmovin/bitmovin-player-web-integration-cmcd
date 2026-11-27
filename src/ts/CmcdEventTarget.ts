@@ -1,5 +1,5 @@
 /**
- * CMCD v2 Event Mode: one report destination. Builds its records and sends them as `text/cmcd` POST body.
+ * CMCD v2 Event Mode: one report destination. Builds its records and sends them as `application/cmcd` POST body.
  */
 
 import {
@@ -260,7 +260,7 @@ export class CmcdEventReporter {
     if (usesKeepalive) {
       keepaliveBytesInFlight += body.length;
     }
-    const headers: { [name: string]: string } = { 'Content-Type': 'text/cmcd' };
+    const headers: { [name: string]: string } = { 'Content-Type': 'application/cmcd' };
     if (this.authorization) {
       headers.Authorization = this.authorization;
     }

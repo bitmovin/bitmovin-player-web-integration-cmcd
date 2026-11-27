@@ -7,8 +7,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/).
 
 ## [Unreleased]
 ### Added
-- Opt-in CMCD v2 (CTA-5004-A) Request Mode with `CmcdConfig.version: 2`. Sends `v=2`, inner lists with object type parameters, `pr` in `CMCD-Status`, `cid` of up to 128 characters, and the new keys `sta`, `sn`, `msd`, `pt`, `bsa`, `bsd`, `bsda`, `ec`, `lb`, `tbl`, `pb`, `dfa` and `ltc`. Without `version`, or with `version: 1`, the output is unchanged.
-- Opt-in CMCD v2 Event Mode with `CmcdConfig.eventTargets`. Sends `text/cmcd` POST reports per target for the events `ps`, `e`, `t`, `rr`, `c`, `h`, `m`, `um`, `bc`, `abs`, `abe`, `as`, `ae`, `sk` and `ce`, with per-target event and key filters, batching, `Authorization` header, custom keys, URL filter for the `url` key, retry with backoff (respecting `Retry-After`), a request timeout, and `keepalive` for the reports sent when the page or the player ends. Request Mode output is unchanged.
+- Opt-in CMCD v2 (CTA-5004-B) Request Mode with `CmcdConfig.version: 2`. Sends `v=2`, inner lists with object type parameters, `pr` in `CMCD-Status`, `cid` of up to 128 characters, and the new keys `sta`, `sn`, `msd`, `pt`, `bsa`, `bsd`, `bsda`, `ec`, `lb`, `tbl`, `pb`, `dfa` and `ltc`. Without `version`, or with `version: 1`, the output is unchanged.
+- Opt-in CMCD v2 Event Mode with `CmcdConfig.eventTargets`. Sends `application/cmcd` POST reports per target for the events `ps`, `e`, `t`, `rr`, `c`, `h`, `m`, `um`, `bc`, `abs`, `abe`, `as`, `ae`, `sk` and `ce`, with per-target event and key filters, batching, `Authorization` header, custom keys, URL filter for the `url` key, retry with backoff (respecting `Retry-After`), a request timeout, and `keepalive` for the reports sent when the page or the player ends. Request Mode output is unchanged.
 - `CmcdIntegration.sendCustomEvent(name, customKeys?)` to report a custom event (`e=ce`).
 - `CmcdIntegration.destroy()` to send pending Event Mode reports and remove all listeners and timers. With Event Mode, it is also called on the player `Destroy` event.
 
