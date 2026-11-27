@@ -506,7 +506,14 @@ function toEntries(
 
   // 9. Key-value pairs SHOULD be sequenced in alphabetical order of the key name in
   // order to reduce the fingerprinting surface exposed by the player.
-  return entries.sort((a, b) => a.key.localeCompare(b.key));
+  // Case-insensitive, then by code point. Independent of the locale, unlike `localeCompare`.
+  return entries.sort(
+    (a, b) => compareCodePoints(a.key.toLowerCase(), b.key.toLowerCase()) || compareCodePoints(a.key, b.key)
+  );
+}
+
+function compareCodePoints(a: string, b: string): number {
+  return a < b ? -1 : a > b ? 1 : 0;
 }
 
 function joinMembers(entries: CmcdEntry[]): string {

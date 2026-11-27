@@ -2,6 +2,7 @@ import { describe, beforeEach, afterEach, it, expect, jest } from '@jest/globals
 import { HttpRequest, HttpRequestMethod, HttpRequestType, HttpResponseType, PlayerAPI } from 'bitmovin-player';
 import { CmcdIntegration, CmcdConfig } from '../../src/ts/CmcdIntegration';
 import { CmcdCustomKey, CmcdDataV1, cmcdDataToHeader, cmcdDataToUrlParameter, CmcdHeaderType } from '../../src/ts/Cmcd';
+import { playerExports } from './helpers/playerExports';
 
 // Jest Mocking for helper functions
 jest.mock('../../src/ts/Cmcd', () => {
@@ -53,36 +54,7 @@ describe('CmcdIntegration', () => {
       getAvailableSegments: jest.fn(),
       isStalled: jest.fn().mockReturnValue(false),
       isPlaying: jest.fn().mockReturnValue(true),
-      exports: {
-        HttpRequestType: {
-          MEDIA_AUDIO: 'media/audio',
-          MEDIA_VIDEO: 'media/video',
-          MANIFEST_DASH: 'manifest/dash',
-          MANIFEST_HLS_MASTER: 'manifest/hls/master',
-          MANIFEST_HLS_VARIANT: 'manifest/hls/variant',
-          MANIFEST_SMOOTH: 'manifest/smooth',
-          MANIFEST_ADS: 'manifest/ads',
-          DRM_LICENSE_WIDEVINE: 'drm/license/widevine',
-        },
-        PlayerEvent: {
-          SourceUnloaded: 'sourceunloaded',
-          StallStarted: 'stallstarted',
-          StallEnded: 'stallended',
-          Seek: 'seek',
-          Seeked: 'seeked',
-          TimeShift: 'timeshift',
-          TimeShifted: 'timeshifted',
-          Playing: 'playing',
-        },
-        BufferType: {
-          ForwardDuration: 'forwardduration',
-          BackwardDuration: 'backwardduration',
-        },
-        MediaType: {
-          Video: 'video',
-          Audio: 'audio',
-        },
-      },
+      exports: playerExports,
       on: jest.fn((event: string, handler: () => void) => {
         playerEventHandlers[event] = handler;
       }),

@@ -86,11 +86,11 @@ Additional keys in v2:
 | --- | --- | --- |
 | `sta` | Play state: `d` before play, `s` starting, `p` playing, `k` seeking, `r` rebuffering, `a` paused (also if the browser blocked autoplay), `e` ended, `f` fatal error | Player events and state at request time |
 | `sn` | Sequence number per origin (report destination), starting at 0 | Counted per request |
-| `msd` | Startup delay from `Play` to `Playing`, sent once per session id with the next request | Player events |
+| `msd` | Startup delay from the first `Play` to `Playing`, sent once per session id with the next media object request (audio, video or init segment) | Player events |
 | `pt` | Playhead time in ms. VOD: offset from the start. Live: epoch ms if the player knows the wallclock time, else the player's current time | `getCurrentTime()` |
 | `bsa`, `bsda` | Rebuffering count and duration since session start, also when 0 | `StallStarted`/`StallEnded` |
-| `bsd` | Durations of the completed rebufferings, reported once to each origin | `StallStarted`/`StallEnded` |
-| `ec` | Player error codes, reported once to each origin. Warnings are not reported, as their codes overlap with error codes | `Error` events |
+| `bsd` | Durations of the completed rebufferings, reported once to each origin (the last 32 per origin). The first request of the session to an origin carries the durations of the session. | `StallStarted`/`StallEnded` |
+| `ec` | Player error codes, reported once to each origin, also errors before the first request to the origin. Warnings are not reported, as their codes overlap with error codes | `Error` events |
 | `lb` | Lowest bitrate of the requested media type | `getAvailableVideoQualities()`/`getAvailableAudioQualities()` |
 | `tbl` | Target buffer length of the requested media type | `buffer.getLevel()` |
 | `pb` | Bitrate being played of the requested media type | `getPlaybackVideoData()`/`getPlaybackAudioData()` |
@@ -98,9 +98,9 @@ Additional keys in v2:
 | `dfa` | Dropped frames since session start, video requests only, also when 0 | `getDroppedVideoFrames()` |
 | `ltc` | Live latency | `lowlatency.getLatency()` |
 
-Rebuffering excludes stalls during startup and seeking. With `PlaybackConfig.autoplay`, `msd` is measured from the `Play` event of the autoplay.
+Rebuffering excludes stalls during startup and seeking; a seek ends an ongoing rebuffering. In v2, `bs` is reported once to each origin after a stall. With `PlaybackConfig.autoplay`, `msd` is measured from the `Play` event of the autoplay.
 
-`sn`, `bsa`, `bsda`, `dfa` and `msd` continue across sources until the application sets a new session id with `setSessionId`. A new session id resets them. `bsd` and `ec` are buffered per origin for up to 16 origins; the least recently used origin is dropped.
+`sn`, `bsa`, `bsda`, `dfa` and `msd` continue across sources until the application sets a new session id with `setSessionId`. A new session id resets them. `bs`, `bsd` and `ec` are buffered per origin for up to 16 origins; the least recently used origin is dropped. `sn` keeps increasing for a dropped origin.
 
 Not implemented:
 - `nr`, `cs`: no reliable source

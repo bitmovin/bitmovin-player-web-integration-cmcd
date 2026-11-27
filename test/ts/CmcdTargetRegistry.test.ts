@@ -1,24 +1,31 @@
 import { describe, it, expect } from '@jest/globals';
-import { CmcdTargetRegistry } from '../../src/ts/CmcdTargetRegistry';
+import { CmcdTargetRegistry, toOrigin } from '../../src/ts/CmcdTargetRegistry';
+
+describe('toOrigin', () => {
+  it('returns the origin of a URL', () => {
+    expect(toOrigin('https://a.example/x/1.m4s?q=1')).toBe('https://a.example');
+    expect(toOrigin('https://a.example:8443/1.m4s')).toBe('https://a.example:8443');
+  });
+
+  it('returns the same empty origin for all invalid URLs', () => {
+    expect(toOrigin('not a url')).toBe('');
+    expect(toOrigin('also not a url')).toBe('');
+  });
+});
 
 describe('CmcdTargetRegistry', () => {
   const createRegistry = (max: number) => {
     let created = 0;
-    const registry = new CmcdTargetRegistry(() => ({ id: ++created }), max);
+    const registry = new CmcdTargetRegistry((key) => ({ id: ++created, key }), max);
     return registry;
   };
 
-  it('returns the same state for URLs of the same origin', () => {
+  it('returns the same state for the same key, created with the key', () => {
     const registry = createRegistry(4);
 
-    expect(registry.get('https://a.example/x/1.m4s')).toBe(registry.get('https://a.example/y/2.m4s?q=1'));
-    expect(registry.get('https://a.example/1.m4s')).not.toBe(registry.get('https://b.example/1.m4s'));
-  });
-
-  it('shares one state for all invalid URLs', () => {
-    const registry = createRegistry(4);
-
-    expect(registry.get('not a url')).toBe(registry.get('also not a url'));
+    expect(registry.get('a')).toBe(registry.get('a'));
+    expect(registry.get('a')).not.toBe(registry.get('b'));
+    expect(registry.get('b').key).toBe('b');
   });
 
   it('drops the least recently used origin when full', () => {

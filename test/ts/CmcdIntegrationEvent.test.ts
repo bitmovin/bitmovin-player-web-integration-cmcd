@@ -1,6 +1,7 @@
 import { describe, beforeEach, afterEach, it, expect, jest } from '@jest/globals';
 import { HttpRequestMethod, HttpRequestType, HttpResponseType, PlayerAPI } from 'bitmovin-player';
 import { CmcdConfig, CmcdEventTarget, CmcdIntegration, CmcdUrlFilter, CustomKey } from '../../src/ts/CmcdIntegration';
+import { playerExports } from './helpers/playerExports';
 
 const START = 1764752400000;
 const COLLECTOR = 'https://collector.example.com/cmcd';
@@ -22,35 +23,6 @@ interface FetchResponse {
 }
 
 type FetchMock = jest.Mock<(url: string, init: FetchInit) => Promise<FetchResponse>>;
-
-const PLAYER_EVENTS: Record<string, string> = {
-  SourceLoaded: 'sourceloaded',
-  SourceUnloaded: 'sourceunloaded',
-  Destroy: 'destroy',
-  Play: 'play',
-  Playing: 'playing',
-  Paused: 'paused',
-  Seek: 'seek',
-  Seeked: 'seeked',
-  TimeShift: 'timeshift',
-  TimeShifted: 'timeshifted',
-  StallStarted: 'stallstarted',
-  StallEnded: 'stallended',
-  PlaybackFinished: 'playbackfinished',
-  Error: 'error',
-  Muted: 'muted',
-  Unmuted: 'unmuted',
-  PlaybackSpeedChanged: 'playbackspeedchanged',
-  ViewModeChanged: 'viewmodechanged',
-  VideoDownloadQualityChanged: 'videodownloadqualitychanged',
-  AudioDownloadQualityChanged: 'audiodownloadqualitychanged',
-  AdBreakStarted: 'adbreakstarted',
-  AdBreakFinished: 'adbreakfinished',
-  AdStarted: 'adstarted',
-  AdFinished: 'adfinished',
-  AdSkipped: 'adskipped',
-  AdError: 'aderror',
-};
 
 /** Lets pending promise callbacks run */
 const settle = async () => {
@@ -178,21 +150,7 @@ describe('CmcdIntegration Event Mode', () => {
       off: (event: string, handler: (event?: unknown) => void) => {
         handlers[event] = (handlers[event] || []).filter((registered) => registered !== handler);
       },
-      exports: {
-        HttpRequestType: {
-          MEDIA_AUDIO: 'media/audio',
-          MEDIA_VIDEO: 'media/video',
-          MANIFEST_DASH: 'manifest/dash',
-          MANIFEST_HLS_MASTER: 'manifest/hls/master',
-          MANIFEST_HLS_VARIANT: 'manifest/hls/variant',
-          MANIFEST_SMOOTH: 'manifest/smooth',
-          DRM_LICENSE_WIDEVINE: 'drm/license/widevine',
-        },
-        PlayerEvent: PLAYER_EVENTS,
-        BufferType: { ForwardDuration: 'forwardduration' },
-        MediaType: { Audio: 'audio', Video: 'video' },
-        ViewMode: { Inline: 'inline', Fullscreen: 'fullscreen', PictureInPicture: 'pictureinpicture' },
-      },
+      exports: playerExports,
     } as unknown as PlayerAPI;
   });
 
