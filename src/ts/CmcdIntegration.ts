@@ -38,6 +38,7 @@ import {
 } from './Cmcd';
 import { toRelativeUrl } from './Url';
 import { createWarnOnce } from './Log';
+import { CmcdSessionMetrics } from './CmcdSessionMetrics';
 import { CmcdTargetRegistry } from './CmcdTargetRegistry';
 
 export { CmcdCustomKey as CustomKey } from './Cmcd';
@@ -143,7 +144,6 @@ export class CmcdIntegration {
   private isSeeking: boolean;
   private hasFatalError: boolean;
   /** Start time of the current rebuffering, `null` if none */
-  private rebufferingStartedAt: number | null;
 
   // Session state for v2 keys, reset on a new session id
   /** State per origin, in order of last use */
@@ -154,12 +154,7 @@ export class CmcdIntegration {
   /** `msd` to send with the next request */
   private pendingStartupDelay: number | null;
   private startupDelaySent: boolean;
-  private rebufferingCount: number;
-  private rebufferingDuration: number;
-  /** Dropped frames of the previous sources of the session */
-  private droppedFramesOffset = 0;
-  /** Last dropped frames count of the current source */
-  private droppedFrames = 0;
+  private sessionMetrics = new CmcdSessionMetrics();
 
   constructor(config: CmcdConfig) {
     this.useQueryArgs = config.useQueryArgs || false;
@@ -203,8 +198,7 @@ export class CmcdIntegration {
     };
     this.player = player;
     on(events.SourceUnloaded, () => {
-      this.droppedFramesOffset += this.droppedFrames;
-      this.droppedFrames = 0;
+      this.sessionMetrics.endSource();
       this.resetSourceState();
     });
     on(events.StallStarted, (event?: PlayerEventBase) => {
@@ -212,19 +206,14 @@ export class CmcdIntegration {
       this.isSeekingOrTimeshiftingOrStartup = true;
       // Rebuffering excludes stalls during startup and seeking.
       if (this.hasStarted && !this.isSeeking) {
-        this.rebufferingCount++;
-        this.rebufferingStartedAt = eventTime(event);
+        this.sessionMetrics.startRebuffering(eventTime(event));
       }
     });
     on(events.StallEnded, (event?: PlayerEventBase) => {
       this.isSeekingOrTimeshiftingOrStartup = false;
-      if (this.rebufferingStartedAt !== null) {
-        const duration = eventTime(event) - this.rebufferingStartedAt;
-        this.rebufferingDuration += duration;
-        if (this.keys.bsd) {
-          this.targets.forEach((target) => target.rebufferingDurations.push(duration));
-        }
-        this.rebufferingStartedAt = null;
+      const duration = this.sessionMetrics.endRebuffering(eventTime(event));
+      if (duration !== null && this.keys.bsd) {
+        this.targets.forEach((target) => target.rebufferingDurations.push(duration));
       }
     });
     // Startup ends when playback begins. Without this, `su` is sent until the first seek or stall.
@@ -280,7 +269,6 @@ export class CmcdIntegration {
     this.hasStarted = false;
     this.isSeeking = false;
     this.hasFatalError = false;
-    this.rebufferingStartedAt = null;
   }
 
   /** Clears all state that belongs to the previous session id. Known origins are kept as report destinations. */
@@ -292,12 +280,7 @@ export class CmcdIntegration {
     });
     this.pendingStartupDelay = null;
     this.startupDelaySent = false;
-    // An ongoing rebuffering is counted in the new session from now on.
-    this.rebufferingCount = this.rebufferingStartedAt === null ? 0 : 1;
-    this.rebufferingStartedAt = this.rebufferingStartedAt === null ? null : Date.now();
-    this.rebufferingDuration = 0;
-    // The dropped frames of the current source so far belong to the previous session.
-    this.droppedFramesOffset = -this.droppedFrames;
+    this.sessionMetrics.startSession(Date.now());
   }
 
   public onVideoAdaptation = (data: VideoAdaptationData) => {
@@ -455,10 +438,10 @@ export class CmcdIntegration {
       data.bg = true;
     }
     if (this.keys.bsa) {
-      data.bsa = this.rebufferingCount;
+      data.bsa = this.sessionMetrics.getRebufferingCount();
     }
     if (this.keys.bsda) {
-      data.bsda = this.rebufferingDuration;
+      data.bsda = this.sessionMetrics.getRebufferingDuration();
     }
 
     if (!this.hasStarted) {
@@ -623,11 +606,9 @@ export class CmcdIntegration {
       }
     }
     if (this.keys.dfa && !isAudio) {
-      // The player counts per source, `dfa` since session start.
       const droppedFrames = this.player.getDroppedVideoFrames();
       if (Number.isFinite(droppedFrames)) {
-        this.droppedFrames = droppedFrames;
-        data.dfa = this.droppedFramesOffset + droppedFrames;
+        data.dfa = this.sessionMetrics.droppedFramesOfSession(droppedFrames);
       }
     }
 
