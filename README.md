@@ -84,7 +84,7 @@ Additional keys in v2:
 
 | Key | Description | Source |
 | --- | --- | --- |
-| `sta` | Play state: `d` before play, `s` starting, `p` playing, `k` seeking, `r` rebuffering, `a` paused, `e` ended, `f` fatal error | Player events and state at request time |
+| `sta` | Play state: `d` before play, `s` starting, `p` playing, `k` seeking, `r` rebuffering, `a` paused (also if the browser blocked autoplay), `e` ended, `f` fatal error | Player events and state at request time |
 | `sn` | Sequence number per origin (report destination), starting at 0 | Counted per request |
 | `msd` | Startup delay from `Play` to `Playing`, sent once per session id with the next request | Player events |
 | `pt` | Playhead time in ms. VOD: offset from the start. Live: epoch ms if the player knows the wallclock time, else the player's current time | `getCurrentTime()` |
@@ -94,6 +94,7 @@ Additional keys in v2:
 | `lb` | Lowest bitrate of the requested media type | `getAvailableVideoQualities()`/`getAvailableAudioQualities()` |
 | `tbl` | Target buffer length of the requested media type | `buffer.getLevel()` |
 | `pb` | Bitrate being played of the requested media type | `getPlaybackVideoData()`/`getPlaybackAudioData()` |
+| `bg` | Backgrounded: sent while the page is hidden, e.g. after switching the tab or minimizing the window. Not sent while the page is visible | Page Visibility API (`document.visibilityState`) |
 | `dfa` | Dropped frames since session start, video requests only, also when 0 | `getDroppedVideoFrames()` |
 | `ltc` | Live latency | `lowlatency.getLatency()` |
 
@@ -101,10 +102,8 @@ Rebuffering excludes stalls during startup and seeking. With `PlaybackConfig.aut
 
 `sn`, `bsa`, `bsda`, `dfa` and `msd` continue across sources until the application sets a new session id with `setSessionId`. A new session id resets them. `bsd` and `ec` are buffered per origin for up to 16 origins; the least recently used origin is dropped.
 
-Known limitation: if the browser blocks autoplay, `sta` stays `s` until playback starts.
-
 Not implemented:
-- `bg`, `nr`, `cs`: no reliable source
+- `nr`, `cs`: no reliable source
 - `tpb`: increases the fingerprinting surface and SHOULD NOT be sent by default
 - `ab`, `lab`, `tab`: only for unknown individual bitrates, which the player always knows
 - `st=ll`: the player does not expose whether a stream is low latency

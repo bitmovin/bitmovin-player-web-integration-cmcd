@@ -236,6 +236,34 @@ describe('CmcdIntegration v2', () => {
     });
   });
 
+  describe('backgrounded (bg)', () => {
+    const setVisibility = (value: string) =>
+      Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => value });
+
+    afterEach(() => setVisibility('visible'));
+
+    it('is sent while the page is hidden', async () => {
+      setVisibility('hidden');
+      const request = await send(HttpRequestType.MEDIA_VIDEO, videoSegments[0].url);
+
+      expect(request.headers['CMCD-Status']).toContain('bg');
+    });
+
+    it('is not sent while the page is visible', async () => {
+      setVisibility('visible');
+
+      expect((await dataOf()).bg).toBeUndefined();
+    });
+
+    it('is not sent in v1', async () => {
+      setVisibility('hidden');
+      integration = create({ version: 1 });
+      const request = await send(HttpRequestType.MEDIA_VIDEO, videoSegments[0].url);
+
+      expect(JSON.stringify(request.headers)).not.toMatch(/\bbg\b/);
+    });
+  });
+
   describe('play state (sta)', () => {
     it('is preloading before play is requested', async () => {
       expect((await dataOf(HttpRequestType.MANIFEST_DASH)).sta).toBe('d');
@@ -274,6 +302,14 @@ describe('CmcdIntegration v2', () => {
       state.paused = false;
       state.ended = true;
       expect((await dataOf()).sta).toBe('e');
+    });
+
+    it('is paused if autoplay was blocked', async () => {
+      // The player pauses (after warning 1303) without a play event.
+      state.autoplay = true;
+      state.paused = true;
+
+      expect((await dataOf(HttpRequestType.MEDIA_VIDEO)).sta).toBe('a');
     });
 
     it('is not rebuffering during startup', async () => {

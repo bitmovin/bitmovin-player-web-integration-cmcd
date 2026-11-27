@@ -551,6 +551,10 @@ export class CmcdIntegration {
         data.msd = startupDelay;
       }
     }
+    // A hidden page means that all its players are hidden, e.g. after switching the tab or minimizing the window.
+    if (this.keys.bg && typeof document !== 'undefined' && document.visibilityState === 'hidden') {
+      data.bg = true;
+    }
     if (this.keys.bsa) {
       data.bsa = this.rebufferingCount;
     }
@@ -610,6 +614,10 @@ export class CmcdIntegration {
       return CmcdPlayStateToken.Ended;
     }
     if (!this.hasStarted) {
+      // Blocked autoplay: the player pauses before playback starts.
+      if (player.isPaused()) {
+        return CmcdPlayStateToken.Paused;
+      }
       const isAutoplay = !!player.getConfig().playback?.autoplay;
       return this.playRequestedAt !== null || isAutoplay ? CmcdPlayStateToken.Starting : CmcdPlayStateToken.Preloading;
     }
