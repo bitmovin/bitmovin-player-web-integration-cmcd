@@ -1,6 +1,5 @@
 /**
- * CMCD data model and encoding, CMCD v1 according to
- * https://cdn.cta.tech/cta/media/media/resources/standards/pdfs/cta-5004-final.pdf
+ * CMCD data model and encoding, CMCD v1 according to CTA-5004.
  *
  * Limitation:
  * - JSON is not supported, only HTTP Headers and Query Args.
@@ -45,8 +44,7 @@ export enum CmcdVersionNumbers {
 }
 
 /**
- * Enum containing all CMCD keys as defined in
- * https://cdn.cta.tech/cta/media/media/resources/standards/pdfs/cta-5004-final.pdf
+ * Enum containing all CMCD keys as defined in CTA-5004
  */
 export enum CmcdKeysToken {
   EncodedBitrate = 'br',
