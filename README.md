@@ -1,6 +1,7 @@
 # Bitmovin Player CMCD Integration
 
-This project adds support for the Common Media Client Data (CMCD) plugin. Please find more information about the Consumer Technology Association (CTA) Specification in https://cdn.cta.tech/cta/media/media/resources/standards/pdfs/cta-5004-final.pdf
+This project adds support for Common Media Client Data (CMCD) to the Bitmovin Player.
+Please find more information about the Consumer Technology Association (CTA) Specification version 1 at https://cta-wave.github.io/Resources/common-media-client-data--cta-5004-a.html
 
 ## Install
 Install with npm:
