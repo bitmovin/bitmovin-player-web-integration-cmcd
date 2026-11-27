@@ -1,7 +1,6 @@
 /**
- * CMCD data model and encoding, CMCD v1 according to
- * https://cdn.cta.tech/cta/media/media/resources/standards/pdfs/cta-5004-final.pdf
- * and CMCD v2 (CTA-5004-A) Request Mode.
+ * CMCD data model and encoding, CMCD v1 according to CTA-5004
+ * and CMCD v2 (CTA-5004-B) Request Mode.
  *
  * Limitation:
  * - JSON is not supported, only HTTP Headers and Query Args.

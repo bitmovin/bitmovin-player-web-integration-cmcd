@@ -7,7 +7,7 @@ and this project adheres to [Semantic Versioning](http://semver.org/).
 
 ## [Unreleased]
 ### Added
-- Opt-in CMCD v2 (CTA-5004-A) Request Mode with `CmcdConfig.version: 2`. Sends `v=2`, inner lists with object type parameters, `pr` in `CMCD-Status`, `cid` of up to 128 characters, and the new keys `sta`, `sn`, `msd`, `pt`, `bsa`, `bsd`, `bsda`, `ec`, `lb`, `tbl`, `pb`, `dfa` and `ltc`. Without `version`, or with `version: 1`, the output is unchanged.
+- Opt-in CMCD v2 (CTA-5004-B) Request Mode with `CmcdConfig.version: 2`. Sends `v=2`, inner lists with object type parameters, `pr` in `CMCD-Status`, `cid` of up to 128 characters, and the new keys `sta`, `sn`, `msd`, `pt`, `bsa`, `bsd`, `bsda`, `ec`, `lb`, `tbl`, `pb`, `dfa` and `ltc`. Without `version`, or with `version: 1`, the output is unchanged.
 
 ### Changed
 - Internal refactoring of CMCD encoding in preparation for CMCD v2; no change in output for valid values.

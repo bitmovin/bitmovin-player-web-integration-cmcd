@@ -26,7 +26,7 @@ function keys(data: CmcdData, customKeys?: CmcdCustomKey[]): string {
 }
 
 describe('CMCD v2 encoding', () => {
-  // Spec examples, CTA-5004-A section 8.1. Line breaks of the spec text are removed.
+  // Spec examples, CTA-5004-B section 8.1. Line breaks of the spec text are removed.
   describe('spec examples (8.1)', () => {
     const ids = { cid: 'content-id-123', sid: 'session-id-123' };
 

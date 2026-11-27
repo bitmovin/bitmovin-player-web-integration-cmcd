@@ -1,6 +1,6 @@
 # Bitmovin Player CMCD Integration
 
-This project adds support for the Common Media Client Data (CMCD) plugin. Please find more information about the Consumer Technology Association (CTA) Specification in https://cdn.cta.tech/cta/media/media/resources/standards/pdfs/cta-5004-final.pdf
+This project adds support for the Common Media Client Data (CMCD) plugin. It implements CMCD v1 as defined in the Consumer Technology Association (CTA) specification CTA-5004. The latest edition of the specification is published at https://cta-wave.github.io/Resources/common-media-client-data--cta-5004-b.html
 
 ## Install
 Install with npm:
@@ -57,7 +57,7 @@ player.load(source);
 
 ## CMCD v2
 
-CMCD v1 is the default. To send CMCD v2 (CTA-5004-A) Request Mode data, set `version: 2`:
+CMCD v1 is the default. To send CMCD v2 (CTA-5004-B) Request Mode data, set `version: 2`:
 
 ```ts
 const cmcdConfig: CmcdConfig = {
