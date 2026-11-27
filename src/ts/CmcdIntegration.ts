@@ -39,7 +39,8 @@ import {
 import { toRelativeUrl } from './Url';
 import { createWarnOnce } from './Log';
 import { CmcdSessionMetrics } from './CmcdSessionMetrics';
-import { CmcdTargetRegistry } from './CmcdTargetRegistry';
+import { CmcdDestinationState, CmcdStartupDelay, MAX_PENDING_REBUFFERINGS } from './CmcdDestinationState';
+import { CmcdTargetRegistry, toOrigin } from './CmcdTargetRegistry';
 
 export { CmcdCustomKey as CustomKey } from './Cmcd';
 export { CmcdHeaderType as HeaderType } from './Cmcd';
@@ -101,20 +102,19 @@ function appendCmcdQueryArg(url: string, cmcdQueryArg: string): string {
  */
 const RTP_ENCODED_BITRATE_FACTOR = 5;
 
-/** Maximum number of origins with own `sn`, `bsd` and `ec` state. The least recently used one is dropped. */
+/** Maximum number of origins with own `bs`, `bsd` and `ec` state. The least recently used one is dropped. */
 const MAX_TARGETS = 16;
 
 /** Timestamp of an event, or now if the event has none. */
 const eventTime = (event?: PlayerEventBase) => (event && event.timestamp) || Date.now();
 
-/** Request Mode state per report destination (origin) */
-interface CmcdTarget {
-  sequenceNumber: number;
-  /** `bsd` to send with the next request */
-  rebufferingDurations: number[];
-  /** `ec` to send with the next request */
-  errorCodes: string[];
-}
+/** Object types of media object requests, which carry `msd` */
+const MEDIA_OBJECT_TYPES: string[] = [
+  CmcdObjectTypeToken.AudioOnly,
+  CmcdObjectTypeToken.VideoOnly,
+  CmcdObjectTypeToken.MuxedVideoAudio,
+  CmcdObjectTypeToken.InitSegment,
+];
 
 export class CmcdIntegration {
   private sessionId: string;
@@ -143,17 +143,16 @@ export class CmcdIntegration {
   private hasStarted: boolean;
   private isSeeking: boolean;
   private hasFatalError: boolean;
-  /** Start time of the current rebuffering, `null` if none */
 
   // Session state for v2 keys, reset on a new session id
   /** State per origin, in order of last use */
-  private targets = new CmcdTargetRegistry<CmcdTarget>(
-    () => ({ sequenceNumber: 0, rebufferingDurations: [], errorCodes: [] }),
-    MAX_TARGETS
-  );
-  /** `msd` to send with the next request */
-  private pendingStartupDelay: number | null;
-  private startupDelaySent: boolean;
+  private targets = new CmcdTargetRegistry((origin) => this.createTarget(origin), MAX_TARGETS);
+  /** Next `sn` per origin. Kept when the origin state is dropped, so `sn` keeps increasing within the session. */
+  private nextSequenceNumbers = new Map<string, number>();
+  /** `ec` and `bsd` of the session, for origins without a report in this session yet */
+  private sessionErrorCodes: string[] = [];
+  private sessionRebufferings: number[] = [];
+  private startupDelay = new CmcdStartupDelay();
   private sessionMetrics = new CmcdSessionMetrics();
 
   constructor(config: CmcdConfig) {
@@ -186,13 +185,22 @@ export class CmcdIntegration {
       this.player?.off(listener.event, listener.callback);
     }
     this.listeners = [];
+    if (this.player && this.player !== player) {
+      // The source of the previous player ends without `SourceUnloaded`.
+      this.sessionMetrics.endSource();
+      this.resetSourceState();
+    }
 
     const events = player.exports.PlayerEvent;
     const on = <T extends PlayerEventBase>(event: PlayerEvent, callback: (event?: T) => void) => {
       this.listeners.push({ event, callback });
       player.on(event, callback);
     };
-    const setSeeking = (seeking: boolean) => {
+    const setSeeking = (seeking: boolean, event?: PlayerEventBase) => {
+      if (seeking) {
+        // Rebuffering excludes seeking.
+        this.endRebuffering(eventTime(event));
+      }
       this.isSeekingOrTimeshiftingOrStartup = seeking;
       this.isSeeking = seeking;
     };
@@ -203,6 +211,7 @@ export class CmcdIntegration {
     });
     on(events.StallStarted, (event?: PlayerEventBase) => {
       this.stalledSinceLastRequest = true;
+      this.targets.forEach((target) => target.markStarved());
       this.isSeekingOrTimeshiftingOrStartup = true;
       // Rebuffering excludes stalls during startup and seeking.
       if (this.hasStarted && !this.isSeeking) {
@@ -211,24 +220,21 @@ export class CmcdIntegration {
     });
     on(events.StallEnded, (event?: PlayerEventBase) => {
       this.isSeekingOrTimeshiftingOrStartup = false;
-      const duration = this.sessionMetrics.endRebuffering(eventTime(event));
-      if (duration !== null && this.keys.bsd) {
-        this.targets.forEach((target) => target.rebufferingDurations.push(duration));
-      }
+      this.endRebuffering(eventTime(event));
     });
     // Startup ends when playback begins. Without this, `su` is sent until the first seek or stall.
     on(events.Playing, (event?: PlayerEventBase) => {
       this.isSeekingOrTimeshiftingOrStartup = false;
       if (!this.hasStarted) {
         this.hasStarted = true;
-        if (this.playRequestedAt !== null && !this.startupDelaySent) {
-          this.pendingStartupDelay = eventTime(event) - this.playRequestedAt;
+        if (this.playRequestedAt !== null) {
+          this.startupDelay.set(eventTime(event) - this.playRequestedAt);
         }
       }
     });
-    on(events.Seek, () => setSeeking(true));
+    on(events.Seek, (event?: PlayerEventBase) => setSeeking(true, event));
     on(events.Seeked, () => setSeeking(false));
-    on(events.TimeShift, () => setSeeking(true));
+    on(events.TimeShift, (event?: PlayerEventBase) => setSeeking(true, event));
     on(events.TimeShifted, () => setSeeking(false));
 
     // Events for v2 keys only
@@ -246,14 +252,51 @@ export class CmcdIntegration {
         this.hasFatalError = true;
         if (this.keys.ec && event) {
           const errorCode = String(event.code);
-          this.targets.forEach((target) => {
-            if (target.errorCodes.indexOf(errorCode) === -1) {
-              target.errorCodes.push(errorCode);
-            }
-          });
+          if (this.sessionErrorCodes.indexOf(errorCode) === -1) {
+            this.sessionErrorCodes.push(errorCode);
+          }
+          this.targets.forEach((target) => target.addErrorCode(errorCode));
         }
       });
     }
+
+    this.initSourceState(player);
+  }
+
+  /** `setPlayer` after the source started: takes the state that the missed events would have set. */
+  private initSourceState(player: PlayerAPI) {
+    try {
+      if (player.getSource() && player.isPlaying()) {
+        this.hasStarted = true;
+        this.isSeekingOrTimeshiftingOrStartup = false;
+      }
+    } catch {
+      // Unknown state: as before the first event
+    }
+  }
+
+  /** Ends an ongoing rebuffering and queues its duration as `bsd`. */
+  private endRebuffering(time: number) {
+    const duration = this.sessionMetrics.endRebuffering(time);
+    if (duration === null || !this.keys.bsd) {
+      return;
+    }
+    this.sessionRebufferings.push(duration);
+    if (this.sessionRebufferings.length > MAX_PENDING_REBUFFERINGS) {
+      this.sessionRebufferings.shift();
+    }
+    this.targets.forEach((target) => target.addRebuffering(duration));
+  }
+
+  /** State of an origin. In its first report of the session, it gets the `ec` and `bsd` of the session. */
+  private createTarget(origin: string): CmcdDestinationState {
+    const nextSequenceNumber = this.nextSequenceNumbers.get(origin);
+    const target = new CmcdDestinationState(nextSequenceNumber);
+    if (nextSequenceNumber === undefined) {
+      this.sessionErrorCodes.forEach((code) => target.addErrorCode(code));
+      this.sessionRebufferings.forEach((duration) => target.addRebuffering(duration));
+    }
+    return target;
   }
 
   /** Clears all state that belongs to the previously loaded source. */
@@ -273,13 +316,11 @@ export class CmcdIntegration {
 
   /** Clears all state that belongs to the previous session id. Known origins are kept as report destinations. */
   private resetSessionState() {
-    this.targets.forEach((target) => {
-      target.sequenceNumber = 0;
-      target.rebufferingDurations = [];
-      target.errorCodes = [];
-    });
-    this.pendingStartupDelay = null;
-    this.startupDelaySent = false;
+    this.targets.forEach((target) => target.reset());
+    this.nextSequenceNumbers.clear();
+    this.sessionErrorCodes = [];
+    this.sessionRebufferings = [];
+    this.startupDelay.reset();
     this.sessionMetrics.startSession(Date.now());
   }
 
@@ -384,10 +425,13 @@ export class CmcdIntegration {
       data.su = true;
     }
 
-    const isBufferStarvation = this.stalledSinceLastRequest || this.player.isStalled();
+    // v2: per origin. v1: since the prior request.
+    const target = this.keys.sn ? this.targets.get(toOrigin(request.url)) : null;
+    const starved = target ? target.takeStarved() : this.stalledSinceLastRequest;
+    this.stalledSinceLastRequest = false;
+    const isBufferStarvation = starved || this.player.isStalled();
     if (isBufferStarvation) {
       data.bs = true;
-      this.stalledSinceLastRequest = false;
     }
 
     if (type === this.player.exports.HttpRequestType.MEDIA_AUDIO) {
@@ -403,35 +447,29 @@ export class CmcdIntegration {
 
     // TODO: data.nrr = 'byte-range';
 
-    this.addPlayerStateData(data, request);
+    if (target) {
+      this.addPlayerStateData(data, request, target);
+    }
 
     return data;
   }
 
   /** Adds the v2 keys that describe the player and session state. Only keys of the configured version are collected. */
-  private addPlayerStateData(data: CmcdDataV2, request: HttpRequest) {
+  private addPlayerStateData(data: CmcdDataV2, request: HttpRequest, target: CmcdDestinationState) {
     const player = this.player!;
-    const target = this.targets.get(request.url);
-
-    if (this.keys.sn) {
-      data.sn = target.sequenceNumber++;
-    }
-    if (this.keys.bsd && target.rebufferingDurations.length > 0) {
-      data.bsd = target.rebufferingDurations;
-      target.rebufferingDurations = [];
-    }
-    if (this.keys.ec && target.errorCodes.length > 0) {
-      data.ec = target.errorCodes;
-      target.errorCodes = [];
+    target.addTo(data, this.keys);
+    if (data.sn !== undefined) {
+      this.nextSequenceNumbers.set(toOrigin(request.url), data.sn + 1);
     }
     if (this.keys.sta) {
       data.sta = this.getPlayState();
     }
-    // Once per session id, with the first request after startup
-    if (this.keys.msd && this.pendingStartupDelay !== null) {
-      data.msd = this.pendingStartupDelay;
-      this.pendingStartupDelay = null;
-      this.startupDelaySent = true;
+    // Once per session id, with the first media object request after startup
+    if (this.keys.msd && data.ot && MEDIA_OBJECT_TYPES.indexOf(data.ot) !== -1) {
+      const startupDelay = this.startupDelay.take();
+      if (startupDelay !== null) {
+        data.msd = startupDelay;
+      }
     }
     // A hidden page means that all its players are hidden, e.g. after switching the tab or minimizing the window.
     if (this.keys.bg && typeof document !== 'undefined' && document.visibilityState === 'hidden') {

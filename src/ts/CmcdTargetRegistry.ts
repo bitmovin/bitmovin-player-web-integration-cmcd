@@ -1,30 +1,33 @@
+/** Origin of `url`, the report destination of Request Mode. All invalid URLs share the empty origin. */
+export function toOrigin(url: string): string {
+  try {
+    return new URL(url).origin;
+  } catch {
+    return '';
+  }
+}
+
 /**
- * State per report destination (origin of the request URL).
- * Only the most recently used origins are kept, so memory stays bounded.
+ * State per report destination.
+ * Only the most recently used destinations are kept, so memory stays bounded.
  */
 export class CmcdTargetRegistry<T> {
   private readonly targets = new Map<string, T>();
 
-  constructor(private readonly createTarget: () => T, private readonly maxTargets: number) {}
+  constructor(private readonly createTarget: (key: string) => T, private readonly maxTargets: number) {}
 
-  /** State of the origin of `url`, marked as most recently used. All invalid URLs share one state. */
-  get(url: string): T {
-    let origin = '';
-    try {
-      origin = new URL(url).origin;
-    } catch {
-      // Shared by all invalid URLs
-    }
-    let target = this.targets.get(origin);
+  /** State of the destination `key`, marked as most recently used */
+  get(key: string): T {
+    let target = this.targets.get(key);
     if (target !== undefined) {
-      this.targets.delete(origin);
+      this.targets.delete(key);
     } else {
-      target = this.createTarget();
+      target = this.createTarget(key);
       if (this.targets.size >= this.maxTargets) {
         this.targets.delete(this.targets.keys().next().value as string);
       }
     }
-    this.targets.set(origin, target);
+    this.targets.set(key, target);
     return target;
   }
 

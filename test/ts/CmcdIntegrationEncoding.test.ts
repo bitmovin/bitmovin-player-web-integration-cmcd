@@ -2,6 +2,7 @@ import { describe, beforeEach, afterEach, it, expect, jest } from '@jest/globals
 import { HttpRequest, HttpRequestMethod, HttpRequestType, HttpResponseType, PlayerAPI } from 'bitmovin-player';
 import { CmcdConfig, CmcdIntegration, CustomKey, HeaderType } from '../../src/ts/CmcdIntegration';
 import * as Cmcd from '../../src/ts/Cmcd';
+import { playerExports } from './helpers/playerExports';
 
 // Runs the real encoder through `preprocessHttpRequest`.
 describe('CmcdIntegration encoding', () => {
@@ -59,21 +60,7 @@ describe('CmcdIntegration encoding', () => {
           ],
         },
       }),
-      exports: {
-        HttpRequestType: { MEDIA_AUDIO: 'media/audio', MEDIA_VIDEO: 'media/video' },
-        PlayerEvent: {
-          SourceUnloaded: 'sourceunloaded',
-          StallStarted: 'stallstarted',
-          StallEnded: 'stallended',
-          Seek: 'seek',
-          Seeked: 'seeked',
-          TimeShift: 'timeshift',
-          TimeShifted: 'timeshifted',
-          Playing: 'playing',
-        },
-        BufferType: { ForwardDuration: 'forwardduration' },
-        MediaType: { Video: 'video', Audio: 'audio' },
-      },
+      exports: playerExports,
       on: (event: string, handler: () => void) => (playerEventHandlers[event] = handler),
     } as unknown as PlayerAPI;
   });

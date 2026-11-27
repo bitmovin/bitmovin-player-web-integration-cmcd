@@ -1,6 +1,7 @@
 import { describe, beforeEach, afterEach, it, expect, jest } from '@jest/globals';
 import { HttpRequestMethod, HttpRequestType, HttpResponseType, PlayerAPI } from 'bitmovin-player';
 import { CmcdConfig, CmcdIntegration, CustomKey, HeaderType } from '../../src/ts/CmcdIntegration';
+import { playerExports } from './helpers/playerExports';
 
 /**
  * v1 output of a playback scenario, recorded on the encoder before v2 support was added.
@@ -50,32 +51,7 @@ describe('CMCD v1 regression', () => {
         'video/mp4': { v1: videoSegments },
         'audio/mp4': { a1: audioSegments },
       }),
-      exports: {
-        HttpRequestType: {
-          MEDIA_AUDIO: 'media/audio',
-          MEDIA_VIDEO: 'media/video',
-          MANIFEST_DASH: 'manifest/dash',
-          MEDIA_SUBTITLES: 'media/subtitles',
-          DRM_LICENSE_WIDEVINE: 'drm/license/widevine',
-        },
-        PlayerEvent: {
-          SourceUnloaded: 'sourceunloaded',
-          StallStarted: 'stallstarted',
-          StallEnded: 'stallended',
-          Seek: 'seek',
-          Seeked: 'seeked',
-          TimeShift: 'timeshift',
-          TimeShifted: 'timeshifted',
-          Play: 'play',
-          Playing: 'playing',
-          Paused: 'paused',
-          PlaybackFinished: 'playbackfinished',
-          Error: 'error',
-          Warning: 'warning',
-        },
-        BufferType: { ForwardDuration: 'forwardduration' },
-        MediaType: { Video: 'video', Audio: 'audio' },
-      },
+      exports: playerExports,
       on: (event: string, handler: () => void) => (handlers[event] = [...(handlers[event] || []), handler]),
     } as unknown as PlayerAPI;
   });
