@@ -7,7 +7,7 @@ import {
   RETRY_BASE_DELAY_MS,
   RETRY_MAX_DELAY_MS,
 } from '../../src/ts/CmcdEventTarget';
-import { CmcdData, CmcdPlayStateToken, CmcdVersionNumbers } from '../../src/ts/Cmcd';
+import { CmcdEventData, CmcdPlayStateToken, CmcdVersionNumbers } from '../../src/ts/Cmcd';
 
 const URL = 'https://collector.example.com/cmcd';
 
@@ -36,7 +36,7 @@ describe('CmcdEventReporter', () => {
   const bodies = () => fetchMock.mock.calls.map((call) => call[1].body);
   const create = (config: Partial<CmcdEventTarget> = {}) =>
     new CmcdEventReporter({ url: URL, events: ['ce'], keys: [], ...config }, warn);
-  const add = (reporter: CmcdEventReporter, name: string, data: CmcdData = {}) =>
+  const add = (reporter: CmcdEventReporter, name: string, data: CmcdEventData = {}) =>
     reporter.report({ e: 'ce', cen: name, ts: 1, v: CmcdVersionNumbers.v2, ...data });
 
   beforeEach(() => {

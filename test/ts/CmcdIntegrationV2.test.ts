@@ -1,7 +1,7 @@
 import { describe, beforeEach, afterEach, it, expect, jest } from '@jest/globals';
 import { HttpRequestMethod, HttpRequestType, HttpResponseType, PlayerAPI } from 'bitmovin-player';
 import { CmcdConfig, CmcdIntegration, CustomKey, HeaderType } from '../../src/ts/CmcdIntegration';
-import { CmcdData, cmcdDataToHeader } from '../../src/ts/Cmcd';
+import { CmcdDataV2, cmcdDataToHeader } from '../../src/ts/Cmcd';
 
 // Passes the data through to the real encoder, so both the collected data and the output can be checked.
 jest.mock('../../src/ts/Cmcd', () => {
@@ -14,7 +14,7 @@ jest.mock('../../src/ts/Cmcd', () => {
 });
 
 /** CMCD data of the last request (header mode) */
-const lastData = () => (cmcdDataToHeader as jest.Mock).mock.calls.at(-1)?.[0] as CmcdData;
+const lastData = () => (cmcdDataToHeader as jest.Mock).mock.calls.at(-1)?.[0] as CmcdDataV2;
 
 describe('CmcdIntegration v2', () => {
   const base = 'https://cdn.example.com/content';

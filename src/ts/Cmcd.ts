@@ -109,7 +109,7 @@ export enum CmcdHeaderType {
 }
 
 /**
- * CMCD data of one request. Values are unrounded and unencoded; the encoder applies the rules of the
+ * CMCD v1 data of one request. Values are unrounded and unencoded; the encoder applies the rules of the
  * key table. `undefined` keys are not sent.
  */
 export interface CmcdData {
@@ -149,8 +149,10 @@ export interface CmcdData {
   tb?: CmcdListValue;
   /** CMCD version */
   v?: CmcdVersionNumbers;
+}
 
-  // v2 only
+/** CMCD v2 Request Mode data: the v1 keys and the keys added in v2. `nrr` is not sent in v2. */
+export interface CmcdDataV2 extends CmcdData {
   /** Backgrounded: the page is hidden */
   bg?: boolean;
   /** Buffer starvation count since session start */
@@ -179,8 +181,10 @@ export interface CmcdData {
   sta?: CmcdPlayStateToken;
   /** Target buffer length in ms */
   tbl?: CmcdListValue;
+}
 
-  // v2 Event Mode only
+/** CMCD v2 Event Mode data: the v2 Request Mode keys and the Event Mode keys. */
+export interface CmcdEventData extends CmcdDataV2 {
   /** Custom event name, max. 64 characters */
   cen?: string;
   /** Base64 of the `CMSD-Dynamic` response header */
@@ -237,9 +241,12 @@ export interface CmcdKeyInfo {
 /** `cid` and `sid` need a maximum length in every version. */
 type CmcdIdKeyInfo = CmcdKeyInfo & { maxLength: number };
 
-export type CmcdKeyTable = { [K in keyof CmcdData]?: CmcdKeyInfo } & { cid: CmcdIdKeyInfo; sid: CmcdIdKeyInfo };
+export type CmcdKeyTable<T extends CmcdData = CmcdEventData> = { [K in keyof T]?: CmcdKeyInfo } & {
+  cid: CmcdIdKeyInfo;
+  sid: CmcdIdKeyInfo;
+};
 
-export const CMCD_V1_KEYS: CmcdKeyTable = {
+export const CMCD_V1_KEYS: CmcdKeyTable<CmcdData> = {
   br: { header: CmcdHeaderType.Object, type: 'integer', round: 1 },
   bl: { header: CmcdHeaderType.Request, type: 'integer', round: 100 },
   bs: { header: CmcdHeaderType.Status, type: 'boolean', omit: false },
@@ -268,7 +275,7 @@ export const CMCD_V1_KEYS: CmcdKeyTable = {
  * Object type parameter (`;v`, `;a`): added to bitrate keys of the requested object (`br`, `lb`, `pb`, `tb`).
  * Not added to `bl`, `mtp` and `tbl`, as in the spec examples, nor to the stall keys, as the cause of a stall is unknown.
  */
-export const CMCD_V2_KEYS: CmcdKeyTable = {
+export const CMCD_V2_KEYS: CmcdKeyTable<CmcdDataV2> = {
   bl: { header: CmcdHeaderType.Request, type: 'integer', round: 100, list: 'plain' },
   br: { header: CmcdHeaderType.Object, type: 'integer', round: 1, list: 'typed' },
   bg: { header: CmcdHeaderType.Status, type: 'boolean', omit: false },
@@ -303,7 +310,7 @@ export const CMCD_V2_KEYS: CmcdKeyTable = {
 };
 
 /** v2 keys that are only allowed in Event Mode */
-export const CMCD_V2_EVENT_ONLY_KEYS: { [K in keyof CmcdData]?: CmcdKeyInfo } = {
+export const CMCD_V2_EVENT_ONLY_KEYS: { [K in Exclude<keyof CmcdEventData, keyof CmcdDataV2>]?: CmcdKeyInfo } = {
   cen: { type: 'string', maxLength: 64, events: ['ce'] },
   cmsdd: { type: 'string', events: ['rr'] },
   cmsds: { type: 'string', events: ['rr'] },
@@ -318,10 +325,10 @@ export const CMCD_V2_EVENT_ONLY_KEYS: { [K in keyof CmcdData]?: CmcdKeyInfo } = 
 };
 
 /** Keys of v2 Event Mode */
-export const CMCD_V2_EVENT_KEYS: CmcdKeyTable = Object.assign({}, CMCD_V2_EVENT_ONLY_KEYS, CMCD_V2_KEYS);
+export const CMCD_V2_EVENT_KEYS: CmcdKeyTable<CmcdEventData> = Object.assign({}, CMCD_V2_EVENT_ONLY_KEYS, CMCD_V2_KEYS);
 
 /** Key table per version (Request Mode) */
-export const CMCD_KEYS: { [version: number]: CmcdKeyTable } = {
+export const CMCD_KEYS: { [version: number]: CmcdKeyTable<CmcdDataV2> } = {
   [CmcdVersionNumbers.v1]: CMCD_V1_KEYS,
   [CmcdVersionNumbers.v2]: CMCD_V2_KEYS,
 };
@@ -445,7 +452,7 @@ type CmcdMemberEncoder = (
   key: string,
   value: CmcdValue,
   info: CmcdKeyInfo | undefined,
-  data: CmcdData,
+  data: CmcdEventData,
   forHeader: boolean
 ) => string | null;
 
@@ -460,9 +467,14 @@ const MEMBER_ENCODERS: { [version: number]: CmcdMemberEncoder } = {
  * The encoding rules follow the version in `data.v`, v1 if unset or unknown.
  * Event Mode uses the v2 Event Mode keys. Keys that are not allowed for the event type `data.e` are not sent.
  */
-function toEntries(data: CmcdData, customKeys: CmcdCustomKey[], forHeader: boolean, isEventMode = false): CmcdEntry[] {
+function toEntries(
+  data: CmcdEventData,
+  customKeys: CmcdCustomKey[],
+  forHeader: boolean,
+  isEventMode = false
+): CmcdEntry[] {
   const version = data.v && CMCD_KEYS[data.v] ? data.v : CmcdVersionNumbers.v1;
-  const keys = isEventMode ? CMCD_V2_EVENT_KEYS : CMCD_KEYS[version];
+  const keys: CmcdKeyTable = isEventMode ? CMCD_V2_EVENT_KEYS : CMCD_KEYS[version];
   const encodeMember = MEMBER_ENCODERS[version];
   const isAllowed = (info: CmcdKeyInfo) => !info.events || (!!data.e && info.events.indexOf(data.e) !== -1);
   const entries: CmcdEntry[] = [];
@@ -478,7 +490,7 @@ function toEntries(data: CmcdData, customKeys: CmcdCustomKey[], forHeader: boole
     }
   };
 
-  for (const key of Object.keys(data) as (keyof CmcdData)[]) {
+  for (const key of Object.keys(data) as (keyof CmcdEventData)[]) {
     const info = keys[key];
     const value = data[key];
     if (info && value !== undefined && value !== null && isAllowed(info)) {
@@ -499,7 +511,7 @@ function joinMembers(entries: CmcdEntry[]): string {
   return entries.map((entry) => entry.member).join(',');
 }
 
-export function cmcdDataToHeader(data: CmcdData, customKeys: CmcdCustomKey[] = []): CmcdHeaders {
+export function cmcdDataToHeader(data: CmcdDataV2, customKeys: CmcdCustomKey[] = []): CmcdHeaders {
   const entries = toEntries(data, customKeys, true);
   const headers: CmcdHeaders = {};
 
@@ -514,7 +526,7 @@ export function cmcdDataToHeader(data: CmcdData, customKeys: CmcdCustomKey[] = [
   return headers;
 }
 
-export function cmcdDataToUrlParameter(data: CmcdData, customKeys: CmcdCustomKey[] = []): string {
+export function cmcdDataToUrlParameter(data: CmcdDataV2, customKeys: CmcdCustomKey[] = []): string {
   // 10. If the data payload is transmitted as a query argument, then the entire payload
   // string MUST be URLEncoded per [5].
   // Throws a URIError for lone surrogates.
@@ -530,7 +542,7 @@ export function cmcdDataToUrlParameter(data: CmcdData, customKeys: CmcdCustomKey
  * v2 Event Mode: one record of an `application/cmcd` body. As a query argument payload, but not URL encoded.
  * Always v2 (CTA-5004-B 5.2), also if Request Mode uses v1.
  */
-export function cmcdDataToEventRecord(data: CmcdData, customKeys: CmcdCustomKey[] = []): string {
+export function cmcdDataToEventRecord(data: CmcdEventData, customKeys: CmcdCustomKey[] = []): string {
   return joinMembers(toEntries(Object.assign({}, data, { v: CmcdVersionNumbers.v2 }), customKeys, false, true));
 }
 

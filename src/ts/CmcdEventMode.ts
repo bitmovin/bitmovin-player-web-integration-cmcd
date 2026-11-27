@@ -16,7 +16,7 @@ import {
 } from 'bitmovin-player';
 import {
   CmcdCustomKey,
-  CmcdData,
+  CmcdEventData,
   CmcdEventType,
   CmcdObjectTypeToken,
   CmcdPlayStateToken,
@@ -28,7 +28,7 @@ import { CmcdEventReporter, CmcdEventTarget } from './CmcdEventTarget';
 /** State that the integration tracks */
 export interface CmcdEventSource {
   /** State keys, including the media keys per object type, except `br` */
-  getStateData(): CmcdData;
+  getStateData(): CmcdEventData;
   getPlayState(): CmcdPlayStateToken;
 }
 
@@ -267,7 +267,7 @@ export class CmcdEventMode {
     try {
       const request = response.request;
       const pending = request ? this.requests.get(request) : undefined;
-      const data: CmcdData = { ot: objectType };
+      const data: CmcdEventData = { ot: objectType };
       if (typeof response.status === 'number') {
         data.rc = response.status;
       }
@@ -326,7 +326,7 @@ export class CmcdEventMode {
   private report(
     type: CmcdEventType,
     time: number,
-    eventData: CmcdData = {},
+    eventData: CmcdEventData = {},
     requestUrl?: string,
     customKeys: CmcdCustomKey[] = [],
     onlyTarget?: CmcdEventReporter
@@ -350,8 +350,8 @@ export class CmcdEventMode {
   }
 
   /** Keys that describe the player and session state, the same for all targets */
-  private gatherSnapshot(): CmcdData {
-    const data: CmcdData = attempt(() => this.source.getStateData()) || {};
+  private gatherSnapshot(): CmcdEventData {
+    const data: CmcdEventData = attempt(() => this.source.getStateData()) || {};
     if (this.hostname && this.hostname.length <= MAX_HOSTNAME_LENGTH) {
       data.h = this.hostname;
     }

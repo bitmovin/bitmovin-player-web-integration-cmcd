@@ -4,7 +4,8 @@ import {
   CMCD_V2_EVENT_ONLY_KEYS,
   CMCD_V2_KEYS,
   CmcdCustomKey,
-  CmcdData,
+  CmcdEventData,
+  CmcdKeyTable,
   cmcdDataToEventRecord,
   cmcdDataToHeader,
   cmcdDataToUrlParameter,
@@ -39,7 +40,7 @@ describe('CMCD v2 Event Mode encoding', () => {
     });
 
     it('8.2.3 response received', () => {
-      const data: CmcdData = {
+      const data: CmcdEventData = {
         cid: 'bbb',
         cmsdd: 'ZXRwPTEyNTAwO3J0dD0zNTttYj02MDAwO3JkPTIwMA==',
         cmsds: 'c2lkPSI5YTNiLTIxY2QiO2JyPTQ1MDA7ZD00MDAwO290PXY7c3Q9dg==',
@@ -160,7 +161,7 @@ describe('CMCD v2 Event Mode encoding', () => {
           ts: 1764752460000,
         },
         { ...playing, bl: 6000, mtp: mtp(81000, 55000), pt: 89188, sn: 4, ts: 1764752490000 },
-      ].map((record) => cmcdDataToEventRecord(record as CmcdData));
+      ].map((record) => cmcdDataToEventRecord(record as CmcdEventData));
 
       expect(cmcdEventRecordsToBody(records)).toEqual(
         [
@@ -231,7 +232,7 @@ describe('CMCD v2 Event Mode encoding', () => {
     });
 
     it('sends `rr` keys only with `rr`', () => {
-      const rrData: CmcdData = {
+      const rrData: CmcdEventData = {
         v,
         ts: 1,
         rc: 200,
@@ -269,9 +270,9 @@ describe('CMCD v2 Event Mode encoding', () => {
 
   describe('key table', () => {
     it('allows the Event-only keys only in Event Mode', () => {
-      for (const key of Object.keys(CMCD_V2_EVENT_ONLY_KEYS) as (keyof CmcdData)[]) {
+      for (const key of Object.keys(CMCD_V2_EVENT_ONLY_KEYS) as (keyof typeof CMCD_V2_EVENT_ONLY_KEYS)[]) {
         expect(CMCD_V2_EVENT_ONLY_KEYS[key]!.header).toBeUndefined();
-        expect(CMCD_V2_KEYS[key]).toBeUndefined();
+        expect((CMCD_V2_KEYS as CmcdKeyTable)[key]).toBeUndefined();
       }
       expect(Object.keys(CMCD_V2_EVENT_KEYS).sort()).toEqual(
         Object.keys(CMCD_V2_KEYS).concat(Object.keys(CMCD_V2_EVENT_ONLY_KEYS)).sort()
@@ -279,7 +280,7 @@ describe('CMCD v2 Event Mode encoding', () => {
     });
 
     it('does not send Event-only keys in Request Mode', () => {
-      const data: CmcdData = { v, e: 'rr', ts: 1, url: 'u', rc: 200, h: 'host', cen: 'x' };
+      const data: CmcdEventData = { v, e: 'rr', ts: 1, url: 'u', rc: 200, h: 'host', cen: 'x' };
       expect(cmcdDataToUrlParameter(data)).toEqual('CMCD=v%3D2');
       expect(cmcdDataToHeader(data)).toEqual({ 'CMCD-Session': 'v=2' });
       expect(cmcdDataToHeader({ ...data, v: CmcdVersionNumbers.v1 })).toEqual({});

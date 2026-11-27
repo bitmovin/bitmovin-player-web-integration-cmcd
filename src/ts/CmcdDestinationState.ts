@@ -1,4 +1,4 @@
-import { CmcdData, CmcdKeyTable } from './Cmcd';
+import { CmcdEventData, CmcdKeyTable } from './Cmcd';
 
 /**
  * State of one report destination: `sn` and the keys that are reported once per mode and destination
@@ -33,7 +33,7 @@ export class CmcdDestinationState {
   }
 
   /** Adds `sn` and the buffered keys that `keys` contains. Buffered keys are sent once. */
-  public addTo(data: CmcdData, keys: CmcdKeyTable): void {
+  public addTo(data: CmcdEventData, keys: CmcdKeyTable): void {
     if (keys.sn) {
       data.sn = this.sequenceNumber++;
     }

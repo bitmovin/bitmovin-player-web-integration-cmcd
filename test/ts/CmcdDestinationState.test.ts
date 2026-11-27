@@ -1,5 +1,5 @@
 import { describe, it, expect } from '@jest/globals';
-import { CmcdData, CMCD_V2_KEYS } from '../../src/ts/Cmcd';
+import { CmcdEventData, CMCD_V2_KEYS } from '../../src/ts/Cmcd';
 import { CmcdDestinationState, CmcdStartupDelay } from '../../src/ts/CmcdDestinationState';
 
 describe('CmcdStartupDelay', () => {
@@ -34,8 +34,8 @@ describe('CmcdDestinationState', () => {
     const state = new CmcdDestinationState();
     state.setStartupDelay(400);
 
-    const first: CmcdData = {};
-    const second: CmcdData = {};
+    const first: CmcdEventData = {};
+    const second: CmcdEventData = {};
     state.addTo(first, CMCD_V2_KEYS);
     state.addTo(second, CMCD_V2_KEYS);
 

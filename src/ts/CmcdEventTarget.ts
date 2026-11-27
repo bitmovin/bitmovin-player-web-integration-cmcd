@@ -5,7 +5,7 @@
 import {
   CMCD_V2_EVENT_KEYS,
   CmcdCustomKey,
-  CmcdData,
+  CmcdEventData,
   cmcdDataToEventRecord,
   cmcdEventRecordsToBody,
   CmcdEventType,
@@ -177,7 +177,7 @@ export class CmcdEventReporter {
    * Queues the report of `data`, which holds the event and state keys. Adds `sn`, the buffered keys
    * (sent once, also if filtered), `bs` and `url` from `requestUrl`, then applies the key filter.
    */
-  public report(data: CmcdData, requestUrl?: string, customKeys: CmcdCustomKey[] = []): void {
+  public report(data: CmcdEventData, requestUrl?: string, customKeys: CmcdCustomKey[] = []): void {
     this.state.addTo(data, CMCD_V2_EVENT_KEYS);
     if (this.starved) {
       data.bs = true;
@@ -197,7 +197,7 @@ export class CmcdEventReporter {
     }
     if (this.keys) {
       const requiredKey = EVENT_REQUIRED_KEY[data.e!];
-      for (const key of Object.keys(data) as (keyof CmcdData)[]) {
+      for (const key of Object.keys(data) as (keyof CmcdEventData)[]) {
         if (this.keys.indexOf(key) === -1 && MANDATORY_KEYS.indexOf(key) === -1 && key !== requiredKey) {
           delete data[key];
         }

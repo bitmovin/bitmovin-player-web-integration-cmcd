@@ -2,7 +2,7 @@ import { describe, it, expect, jest, afterEach, beforeEach } from '@jest/globals
 import {
   CMCD_V2_KEYS,
   CmcdCustomKey,
-  CmcdData,
+  CmcdDataV2,
   CmcdHeaderType,
   CmcdObjectTypeToken,
   CmcdPlayStateToken,
@@ -16,12 +16,12 @@ import {
 const v = CmcdVersionNumbers.v2;
 
 /** The v2 payload without query encoding */
-function payload(data: CmcdData, customKeys?: CmcdCustomKey[]): string {
+function payload(data: CmcdDataV2, customKeys?: CmcdCustomKey[]): string {
   return decodeURIComponent(cmcdDataToUrlParameter({ v, ...data }, customKeys).slice('CMCD='.length));
 }
 
 /** The payload without the always present `v=2` */
-function keys(data: CmcdData, customKeys?: CmcdCustomKey[]): string {
+function keys(data: CmcdDataV2, customKeys?: CmcdCustomKey[]): string {
   return payload(data, customKeys).replace(/,?v=2$/, '');
 }
 
@@ -31,7 +31,7 @@ describe('CMCD v2 encoding', () => {
     const ids = { cid: 'content-id-123', sid: 'session-id-123' };
 
     it('8.1.1 standard video segment request', () => {
-      const data: CmcdData = {
+      const data: CmcdDataV2 = {
         ...ids,
         v,
         bl: 2000,
@@ -61,7 +61,7 @@ describe('CMCD v2 encoding', () => {
     });
 
     it('8.1.2 standard audio segment request (deviation: `br` carries `;a`)', () => {
-      const data: CmcdData = {
+      const data: CmcdDataV2 = {
         ...ids,
         v,
         bl: 2000,
@@ -84,7 +84,7 @@ describe('CMCD v2 encoding', () => {
     });
 
     it('8.1.3 standard request showing minimal fields', () => {
-      const data: CmcdData = { ...ids, v };
+      const data: CmcdDataV2 = { ...ids, v };
 
       expect(cmcdDataToUrlParameter(data)).toEqual(
         'CMCD=cid%3D%22content-id-123%22%2Csid%3D%22session-id-123%22%2Cv%3D2'
@@ -98,7 +98,7 @@ describe('CMCD v2 encoding', () => {
       const session = { ...ids, v, st: CmcdStreamTypeToken.Vod };
 
       it('request 1: manifest', () => {
-        const data: CmcdData = {
+        const data: CmcdDataV2 = {
           ...session,
           ot: CmcdObjectTypeToken.ManifestOrPlaylistTextFile,
           sf: CmcdStreamingFormatToken.MpegDash,
@@ -116,7 +116,7 @@ describe('CMCD v2 encoding', () => {
       });
 
       it('request 2: init segment (deviation: one `nor` object, no type parameter for `ot=i`)', () => {
-        const data: CmcdData = {
+        const data: CmcdDataV2 = {
           ...session,
           bl: 0,
           br: 3000,
@@ -136,7 +136,7 @@ describe('CMCD v2 encoding', () => {
       });
 
       it('request 3: first segment (deviation: one `nor` object)', () => {
-        const data: CmcdData = {
+        const data: CmcdDataV2 = {
           ...session,
           bl: 0,
           br: 3000,
@@ -160,7 +160,7 @@ describe('CMCD v2 encoding', () => {
       });
 
       it('request 4: second segment with startup delay (deviation: one `nor` object)', () => {
-        const data: CmcdData = {
+        const data: CmcdDataV2 = {
           ...session,
           bl: 4000,
           br: 3000,
@@ -186,7 +186,7 @@ describe('CMCD v2 encoding', () => {
 
     describe('8.1.5 error scenario', () => {
       it('non-fatal error', () => {
-        const data: CmcdData = { ...ids, v, ec: ['CODEC_NOT_SUPPORTED'], sta: CmcdPlayStateToken.Playing };
+        const data: CmcdDataV2 = { ...ids, v, ec: ['CODEC_NOT_SUPPORTED'], sta: CmcdPlayStateToken.Playing };
 
         expect(cmcdDataToUrlParameter(data)).toEqual(
           'CMCD=cid%3D%22content-id-123%22%2Cec%3D%28%22CODEC_NOT_SUPPORTED%22%29%2Csid%3D%22session-id-123%22%2Csta%3Dp%2Cv%3D2'
@@ -199,7 +199,7 @@ describe('CMCD v2 encoding', () => {
       });
 
       it('fatal error', () => {
-        const data: CmcdData = {
+        const data: CmcdDataV2 = {
           ...ids,
           v,
           ec: ['DRM_NOT_SUPPORTED', 'PLAYBACK_FAILED'],
@@ -218,7 +218,7 @@ describe('CMCD v2 encoding', () => {
     });
 
     it('8.1.6 rebuffering, minimal information', () => {
-      const data: CmcdData = {
+      const data: CmcdDataV2 = {
         ...ids,
         v,
         bl: 0,
@@ -240,7 +240,7 @@ describe('CMCD v2 encoding', () => {
 
     it('8.1.8 assigns the implemented keys to the same headers', () => {
       const shards: Record<string, string[]> = {};
-      for (const key of Object.keys(CMCD_V2_KEYS) as (keyof CmcdData)[]) {
+      for (const key of Object.keys(CMCD_V2_KEYS) as (keyof CmcdDataV2)[]) {
         (shards[CMCD_V2_KEYS[key]!.header] ||= []).push(key);
       }
       // 8.1.8 without the keys that are not implemented (cs, nr, tpb)
