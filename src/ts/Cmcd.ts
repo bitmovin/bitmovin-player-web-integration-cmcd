@@ -1,6 +1,5 @@
 /**
- * Enums, keys, classes for CMCD v1.0 support according to
- * https://cdn.cta.tech/cta/media/media/resources/standards/pdfs/cta-5004-final.pdf
+ * Enums, keys, classes for CMCD v1.0 support according to CTA-5004.
  *
  * Limitation:
  * - JSON is not supported, only HTTP Headers and Query Args.
@@ -42,8 +41,7 @@ export enum CmcdVersionNumbers {
 }
 
 /**
- * Enum containing all CMCD keys as defined in
- * https://cdn.cta.tech/cta/media/media/resources/standards/pdfs/cta-5004-final.pdf
+ * Enum containing all CMCD keys as defined in CTA-5004
  */
 export enum CmcdKeysToken {
   EncodedBitrate = 'br',
@@ -149,8 +147,7 @@ export function cmcdDataToJson(data: CmcdBase[]): string {
 }
 
 /*
- * CMCD keys and details are defined in
- * https://cdn.cta.tech/cta/media/media/resources/standards/pdfs/cta-5004-final.pdf
+ * CMCD keys and details are defined in CTA-5004
  */
 export abstract class CmcdBase {
   public readonly value: unknown;
@@ -179,8 +176,9 @@ export abstract class CmcdBase {
       return `${this.key}=${escapeCmcdString(this.value)}`;
     }
     if (typeof this.value === 'boolean') {
-      // 2. If the value type is BOOLEAN and the value is TRUE, then the equals sign and the value MUST be omitted
-      return this.value === true ? `${this.key}` : `${this.key}=${this.value}`;
+      // 2. If the value type is BOOLEAN and the value is TRUE, then the equals sign and the value MUST be omitted.
+      // Boolean keys (`bs`, `su`) MUST NOT be sent if false.
+      return this.value === true ? `${this.key}` : ``;
     }
     return `${this.key}=${this.value}`;
   }
@@ -199,7 +197,7 @@ export class CmcdEncodedBitrate extends CmcdBase {
   public readonly type = CmcdHeaderType.Object;
 
   constructor(value: IntegerKbps) {
-    super(value);
+    super(Math.round(value));
   }
 }
 
@@ -271,7 +269,7 @@ export class CmcdObjectDuration extends CmcdBase {
   public readonly type = CmcdHeaderType.Object;
 
   constructor(value: IntegerMilliSecs) {
-    super(value);
+    super(Math.round(value));
   }
 }
 
@@ -522,11 +520,6 @@ export class CmcdStartup extends CmcdBase {
   constructor(value: boolean) {
     super(value);
   }
-
-  override keyValuePairToString() {
-    // 2. If the value type is BOOLEAN and the value is TRUE, then the equals sign and the value MUST be omitted
-    return this.value === true ? `${this.key}` : ``;
-  }
 }
 
 /**
@@ -539,7 +532,7 @@ export class CmcdTopBitrate extends CmcdBase {
   public readonly type = CmcdHeaderType.Object;
 
   constructor(value: IntegerKbps) {
-    super(value);
+    super(Math.round(value));
   }
 }
 

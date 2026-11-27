@@ -106,6 +106,9 @@ function appendCmcdQueryArg(url: string, cmcdQueryArg: string): string {
  */
 const RTP_ENCODED_BITRATE_FACTOR = 5;
 
+/** Maximum length of the content id (`cid`) and session id (`sid`) in CMCD v1. */
+const MAX_ID_LENGTH = 64;
+
 export class CmcdIntegration {
   private sessionId: string;
   private contentId: string;
@@ -119,6 +122,7 @@ export class CmcdIntegration {
   private lastMeasuredThroughputAudio: number;
   private lastMeasuredThroughputVideo: number;
   private manifestType: CmcdStreamingFormatToken | null;
+  private warnedIds = new Set<string>();
 
   constructor(config: CmcdConfig) {
     this.useQueryArgs = config.useQueryArgs || false;
@@ -196,6 +200,11 @@ export class CmcdIntegration {
   };
 
   public preprocessHttpResponse = (type: HttpRequestType, response: HttpResponse<HttpResponseBody>) => {
+    // The player passes no response if a request failed without one (e.g. network error)
+    if (!response) {
+      return Promise.resolve(response);
+    }
+
     const time = response.elapsedTime;
     const bytes = response.length;
 
@@ -241,11 +250,11 @@ export class CmcdIntegration {
       data.push(streamingFormat);
     }
 
-    if (this.contentId) {
+    if (this.isValidId(CmcdKeysToken.ContentId, this.contentId)) {
       data.push(new CmcdContentId(this.contentId));
     }
 
-    if (this.sessionId) {
+    if (this.isValidId(CmcdKeysToken.SessionId, this.sessionId)) {
       data.push(new CmcdSessionId(this.sessionId));
     }
 
@@ -278,6 +287,21 @@ export class CmcdIntegration {
     }
 
     return data;
+  }
+
+  /** `cid` and `sid` are limited to 64 characters. Longer values are omitted, as truncating could cause collisions. */
+  private isValidId(key: CmcdKeysToken, value: string): boolean {
+    if (!value) {
+      return false;
+    }
+    if (value.length <= MAX_ID_LENGTH) {
+      return true;
+    }
+    if (!this.warnedIds.has(value)) {
+      this.warnedIds.add(value);
+      console.warn(`CMCD: '${key}' exceeds ${MAX_ID_LENGTH} characters (${value.length}) and is not sent.`);
+    }
+    return false;
   }
 
   private getRequestedMaximumThroughput(data: CmcdBase[]): CmcdBase[] {
