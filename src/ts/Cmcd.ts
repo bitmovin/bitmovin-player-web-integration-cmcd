@@ -1,10 +1,9 @@
 /**
  * CMCD data model and encoding, CMCD v1 according to CTA-5004
- * and CMCD v2 (CTA-5004-B) Request Mode.
+ * and CMCD v2 (CTA-5004-B) Request Mode and Event Mode.
  *
  * Limitation:
- * - JSON is not supported, only HTTP Headers and Query Args.
- * - v2 Event Mode is not supported.
+ * - JSON is not supported, only HTTP Headers, Query Args and (Event Mode) the `application/cmcd` body.
  */
 
 import {
@@ -62,6 +61,37 @@ export enum CmcdPlayStateToken {
   Preloading = 'd',
 }
 
+/** v2 Event Mode event types (`e`) that this integration reports */
+export type CmcdEventType =
+  | 'abe'
+  | 'abs'
+  | 'ae'
+  | 'as'
+  | 'b'
+  | 'bc'
+  | 'c'
+  | 'ce'
+  | 'e'
+  | 'h'
+  | 'm'
+  | 'pc'
+  | 'pe'
+  | 'pr'
+  | 'ps'
+  | 'rr'
+  | 'sk'
+  | 't'
+  | 'um';
+
+/** v2: one value of an Inner List with the object type as parameter, e.g. `4200;v` */
+export interface CmcdTypedValue {
+  value: number;
+  type: CmcdObjectTypeToken;
+}
+
+/** v2: plain value, which gets the object type of the request as parameter, or values per object type */
+export type CmcdListValue = number | CmcdTypedValue[];
+
 export interface CmcdHeaders {
   [CmcdHeaderType.Request]?: string;
   [CmcdHeaderType.Object]?: string;
@@ -87,9 +117,9 @@ export enum CmcdHeaderType {
  */
 export interface CmcdDataV1 {
   /** Encoded bitrate in kbps */
-  br?: number;
+  br?: CmcdListValue;
   /** Buffer length in ms */
-  bl?: number;
+  bl?: CmcdListValue;
   /** Buffer starvation since the prior request */
   bs?: boolean;
   /** Content id, max. 64 characters */
@@ -99,7 +129,7 @@ export interface CmcdDataV1 {
   /** Deadline in ms */
   dl?: number;
   /** Measured throughput in kbps */
-  mtp?: number;
+  mtp?: CmcdListValue;
   /** Next object request, path relative to the current request */
   nor?: string;
   /** Next range request, e.g. `12323-48763` */
@@ -119,7 +149,7 @@ export interface CmcdDataV1 {
   /** Startup, seek or recovery after a buffer-empty event */
   su?: boolean;
   /** Top bitrate in kbps */
-  tb?: number;
+  tb?: CmcdListValue;
   /** CMCD version */
   v?: CmcdVersionNumbers;
 }
@@ -139,13 +169,13 @@ export interface CmcdDataV2 extends CmcdDataV1 {
   /** Player error codes since the prior request */
   ec?: string[];
   /** Lowest bitrate in kbps */
-  lb?: number;
+  lb?: CmcdListValue;
   /** Live latency in ms */
   ltc?: number;
   /** Media start delay in ms */
   msd?: number;
   /** Playhead bitrate in kbps */
-  pb?: number;
+  pb?: CmcdListValue;
   /** Playhead time in ms, epoch ms for live with a wallclock */
   pt?: number;
   /** Sequence number */
@@ -153,17 +183,46 @@ export interface CmcdDataV2 extends CmcdDataV1 {
   /** Play state */
   sta?: CmcdPlayStateToken;
   /** Target buffer length in ms */
-  tbl?: number;
+  tbl?: CmcdListValue;
 }
 
-type CmcdValue = string | number | boolean | string[] | number[];
+/** CMCD v2 Event Mode data: the v2 Request Mode keys and the Event Mode keys. */
+export interface CmcdEventData extends CmcdDataV2 {
+  /** Custom event name, max. 64 characters */
+  cen?: string;
+  /** Base64 of the `CMSD-Dynamic` response header */
+  cmsdd?: string;
+  /** Base64 of the `CMSD-Static` response header */
+  cmsds?: string;
+  /** Event type */
+  e?: CmcdEventType;
+  /** Hostname the player retrieves content from, max. 128 characters */
+  h?: string;
+  /** Response code */
+  rc?: number;
+  /** Event time, or request start for `rr`, in epoch ms */
+  ts?: number;
+  /** Time to first byte in ms */
+  ttfb?: number;
+  /** Time to first body byte in ms */
+  ttfbb?: number;
+  /** Time to last byte in ms */
+  ttlb?: number;
+  /** URL of the request, before redirects */
+  url?: string;
+}
+
+type CmcdValue = string | number | boolean | string[] | number[] | CmcdTypedValue[];
 
 type CmcdScalar = string | number | boolean;
 
 type CmcdValueType = 'integer' | 'decimal' | 'string' | 'token' | 'boolean';
 
 export interface CmcdKeyInfo {
-  header: CmcdHeaderType;
+  /** Header in Request Mode, none for Event-only keys */
+  header?: CmcdHeaderType;
+  /** Event Mode: event types the key is allowed for, default all */
+  events?: CmcdEventType[];
   /** Type of the value, or of each list item */
   type: CmcdValueType;
   /** Rounds to a multiple of this value */
@@ -185,7 +244,7 @@ export interface CmcdKeyInfo {
 /** `cid` and `sid` need a maximum length in every version. */
 type CmcdIdKeyInfo = CmcdKeyInfo & { maxLength: number };
 
-export type CmcdKeyTable<T extends CmcdDataV1 = CmcdDataV2> = { [K in keyof T]?: CmcdKeyInfo } & {
+export type CmcdKeyTable<T extends CmcdDataV1 = CmcdEventData> = { [K in keyof T]?: CmcdKeyInfo } & {
   cid: CmcdIdKeyInfo;
   sid: CmcdIdKeyInfo;
 };
@@ -253,8 +312,26 @@ export const CMCD_V2_KEYS: CmcdKeyTable<CmcdDataV2> = {
   v: { header: CmcdHeaderType.Session, type: 'integer' },
 };
 
-/** Key table per version */
-export const CMCD_KEYS: { [version: number]: CmcdKeyTable } = {
+/** v2 keys that are only allowed in Event Mode */
+export const CMCD_V2_EVENT_ONLY_KEYS: { [K in Exclude<keyof CmcdEventData, keyof CmcdDataV2>]?: CmcdKeyInfo } = {
+  cen: { type: 'string', maxLength: 64, events: ['ce'] },
+  cmsdd: { type: 'string', events: ['rr'] },
+  cmsds: { type: 'string', events: ['rr'] },
+  e: { type: 'token' },
+  h: { type: 'string', maxLength: 128 },
+  rc: { type: 'integer', events: ['rr'] },
+  ts: { type: 'integer', round: 1 },
+  ttfb: { type: 'integer', round: 1, events: ['rr'] },
+  ttfbb: { type: 'integer', round: 1, events: ['rr'] },
+  ttlb: { type: 'integer', round: 1, events: ['rr'] },
+  url: { type: 'string', events: ['rr'] },
+};
+
+/** Keys of v2 Event Mode */
+export const CMCD_V2_EVENT_KEYS: CmcdKeyTable<CmcdEventData> = Object.assign({}, CMCD_V2_EVENT_ONLY_KEYS, CMCD_V2_KEYS);
+
+/** Key table per version (Request Mode) */
+export const CMCD_KEYS: { [version: number]: CmcdKeyTable<CmcdDataV2> } = {
   [CmcdVersionNumbers.v1]: CMCD_V1_KEYS,
   [CmcdVersionNumbers.v2]: CMCD_V2_KEYS,
 };
@@ -355,9 +432,11 @@ function encodeV2Member(key: string, value: CmcdValue, info?: CmcdKeyInfo, ot?: 
   }
   const items: SfItem[] = [];
   for (const itemValue of Array.isArray(value) ? value : [value]) {
-    const item = toV2BareItem(itemValue, info);
+    // Values per object type carry their own type as parameter.
+    const isTyped = typeof itemValue === 'object';
+    const item = toV2BareItem(isTyped ? itemValue.value : itemValue, info);
     if (item !== null) {
-      items.push({ value: item, params });
+      items.push({ value: item, params: isTyped ? { [itemValue.type]: true } : params });
     }
   }
   return items.length > 0 ? serializeDictionaryMember(key, items) : null;
@@ -376,7 +455,7 @@ type CmcdMemberEncoder = (
   key: string,
   value: CmcdValue,
   info: CmcdKeyInfo | undefined,
-  data: CmcdDataV2,
+  data: CmcdEventData,
   forHeader: boolean
 ) => string | null;
 
@@ -387,11 +466,20 @@ const MEMBER_ENCODERS: { [version: number]: CmcdMemberEncoder } = {
   [CmcdVersionNumbers.v2]: (key, value, info, data) => encodeV2Member(key, value, info, data.ot),
 };
 
-/** The encoding rules follow the version in `data.v`, v1 if unset or unknown. */
-function toEntries(data: CmcdDataV2, customKeys: CmcdCustomKey[], forHeader: boolean): CmcdEntry[] {
+/**
+ * The encoding rules follow the version in `data.v`, v1 if unset or unknown.
+ * Event Mode uses the v2 Event Mode keys. Keys that are not allowed for the event type `data.e` are not sent.
+ */
+function toEntries(
+  data: CmcdEventData,
+  customKeys: CmcdCustomKey[],
+  forHeader: boolean,
+  isEventMode = false
+): CmcdEntry[] {
   const version = data.v && CMCD_KEYS[data.v] ? data.v : CmcdVersionNumbers.v1;
-  const keys = CMCD_KEYS[version];
+  const keys: CmcdKeyTable = isEventMode ? CMCD_V2_EVENT_KEYS : CMCD_KEYS[version];
   const encodeMember = MEMBER_ENCODERS[version];
+  const isAllowed = (info: CmcdKeyInfo) => !info.events || (!!data.e && info.events.indexOf(data.e) !== -1);
   const entries: CmcdEntry[] = [];
   const add = (key: string, value: CmcdValue, header: CmcdHeaderType | null, info?: CmcdKeyInfo) => {
     let member: string | null = null;
@@ -405,11 +493,11 @@ function toEntries(data: CmcdDataV2, customKeys: CmcdCustomKey[], forHeader: boo
     }
   };
 
-  for (const key of Object.keys(data) as (keyof CmcdDataV2)[]) {
+  for (const key of Object.keys(data) as (keyof CmcdEventData)[]) {
     const info = keys[key];
     const value = data[key];
-    if (info && value !== undefined && value !== null) {
-      add(key, value, info.header, info);
+    if (info && value !== undefined && value !== null && isAllowed(info)) {
+      add(key, value, info.header || null, info);
     }
   }
   for (const customKey of customKeys) {
@@ -458,6 +546,19 @@ export function cmcdDataToUrlParameter(data: CmcdDataV2, customKeys: CmcdCustomK
     payload = payload.replace(/[!'()*]/g, (char) => `%${char.charCodeAt(0).toString(16).toUpperCase()}`);
   }
   return `CMCD=${payload}`;
+}
+
+/**
+ * v2 Event Mode: one record of an `application/cmcd` body. As a query argument payload, but not URL encoded.
+ * Always v2 (CTA-5004-B 5.2), also if Request Mode uses v1.
+ */
+export function cmcdDataToEventRecord(data: CmcdEventData, customKeys: CmcdCustomKey[] = []): string {
+  return joinMembers(toEntries(Object.assign({}, data, { v: CmcdVersionNumbers.v2 }), customKeys, false, true));
+}
+
+/** v2 Event Mode: `application/cmcd` body of the records, separated by LF without a trailing LF */
+export function cmcdEventRecordsToBody(records: string[]): string {
+  return records.join('\n');
 }
 
 export class CmcdCustomKey {
