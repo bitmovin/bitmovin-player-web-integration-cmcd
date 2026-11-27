@@ -2,7 +2,7 @@ import { describe, it, expect, jest, afterEach } from '@jest/globals';
 import {
   CMCD_V1_KEYS,
   CmcdCustomKey,
-  CmcdData,
+  CmcdDataV1,
   CmcdHeaderType,
   CmcdObjectTypeToken,
   CmcdStreamTypeToken,
@@ -13,22 +13,22 @@ import {
 } from '../../src/ts/Cmcd';
 
 /** The CMCD payload without query encoding, e.g. `bl=0,br=500`. */
-function payload(data: CmcdData, customKeys?: CmcdCustomKey[]): string {
+function payload(data: CmcdDataV1, customKeys?: CmcdCustomKey[]): string {
   return decodeURIComponent(cmcdDataToUrlParameter(data, customKeys).slice('CMCD='.length));
 }
 
 describe('Cmcd', () => {
   it('should transform CMCD data to URL parameter', () => {
-    const data: CmcdData = { br: 500, bl: 0, bs: true, ot: CmcdObjectTypeToken.VideoOnly };
+    const data: CmcdDataV1 = { br: 500, bl: 0, bs: true, ot: CmcdObjectTypeToken.VideoOnly };
 
     expect(cmcdDataToUrlParameter(data)).toEqual('CMCD=bl%3D0%2Cbr%3D500%2Cbs%2Cot%3Dv');
   });
 
   it('should always sort the URL parameters alphabetically by CMCD key', () => {
-    const data1: CmcdData = { br: 500, bl: 0, bs: true, ot: CmcdObjectTypeToken.VideoOnly };
-    const data2: CmcdData = { bl: 0, bs: true, ot: CmcdObjectTypeToken.VideoOnly, br: 500 };
-    const data3: CmcdData = { bs: true, ot: CmcdObjectTypeToken.VideoOnly, bl: 0, br: 500 };
-    const data4: CmcdData = { ot: CmcdObjectTypeToken.VideoOnly, bl: 0, bs: true, br: 500 };
+    const data1: CmcdDataV1 = { br: 500, bl: 0, bs: true, ot: CmcdObjectTypeToken.VideoOnly };
+    const data2: CmcdDataV1 = { bl: 0, bs: true, ot: CmcdObjectTypeToken.VideoOnly, br: 500 };
+    const data3: CmcdDataV1 = { bs: true, ot: CmcdObjectTypeToken.VideoOnly, bl: 0, br: 500 };
+    const data4: CmcdDataV1 = { ot: CmcdObjectTypeToken.VideoOnly, bl: 0, bs: true, br: 500 };
 
     const cmcdUrlParams1 = cmcdDataToUrlParameter(data1);
     const cmcdUrlParams2 = cmcdDataToUrlParameter(data2);
@@ -298,7 +298,7 @@ describe('Cmcd', () => {
   describe('v1 key table', () => {
     it('should assign each key to its header', () => {
       const shards: Record<string, string[]> = {};
-      for (const key of Object.keys(CMCD_V1_KEYS) as (keyof CmcdData)[]) {
+      for (const key of Object.keys(CMCD_V1_KEYS) as (keyof CmcdDataV1)[]) {
         (shards[CMCD_V1_KEYS[key]!.header] ||= []).push(key);
       }
       expect(shards).toEqual({
@@ -376,7 +376,7 @@ describe('Cmcd', () => {
     // Examples from CMCD v1 spec Section 6 taken as test cases
 
     it('Section 6, Example #1:', () => {
-      const data: CmcdData = { sid: '6e2fb550-c457-11e9-bb97-0800200c9a66' };
+      const data: CmcdDataV1 = { sid: '6e2fb550-c457-11e9-bb97-0800200c9a66' };
       expect(cmcdDataToUrlParameter(data)).toEqual('CMCD=sid%3D%226e2fb550-c457-11e9-bb97-0800200c9a66%22');
       expect(cmcdDataToHeader(data)).toEqual({
         'CMCD-Session': 'sid="6e2fb550-c457-11e9-bb97-0800200c9a66"',
@@ -384,7 +384,7 @@ describe('Cmcd', () => {
     });
 
     it('Section 6, Example #2:', () => {
-      const data: CmcdData = {
+      const data: CmcdDataV1 = {
         br: 3200,
         bs: true,
         d: 4004,
@@ -407,7 +407,7 @@ describe('Cmcd', () => {
     });
 
     it('Section 6, Example #3:', () => {
-      const data: CmcdData = { bs: true, rtp: 15000, sid: '6e2fb550-c457-11e9-bb97-0800200c9a66' };
+      const data: CmcdDataV1 = { bs: true, rtp: 15000, sid: '6e2fb550-c457-11e9-bb97-0800200c9a66' };
       // Small mistake in the CMCD spec where 'bs' was truncated to 'b' in this query arg example
       expect(cmcdDataToUrlParameter(data)).toEqual(
         'CMCD=bs%2Crtp%3D15000%2Csid%3D%226e2fb550-c457-11e9-bb97-0800200c9a66%22'
@@ -419,7 +419,7 @@ describe('Cmcd', () => {
     });
 
     it('Section 6, Example #4:', () => {
-      const data: CmcdData = { bs: true, su: true };
+      const data: CmcdDataV1 = { bs: true, su: true };
       expect(cmcdDataToUrlParameter(data)).toEqual('CMCD=bs%2Csu');
       expect(cmcdDataToHeader(data)).toEqual({
         'CMCD-Status': 'bs',
@@ -428,7 +428,7 @@ describe('Cmcd', () => {
     });
 
     it('Section 6, Example #5:', () => {
-      const data: CmcdData = { d: 4004 };
+      const data: CmcdDataV1 = { d: 4004 };
       const customKeys = [
         new CmcdCustomKey('com.example-myNumericKey', 500, CmcdHeaderType.Session),
         new CmcdCustomKey('com.example-myStringKey', 'myStringValue', CmcdHeaderType.Session),
@@ -443,7 +443,7 @@ describe('Cmcd', () => {
     });
 
     it('Section 6, Example #6:', () => {
-      const data: CmcdData = { nor: '../300kbps/segment35.m4v', sid: '6e2fb550-c457-11e9-bb97-0800200c9a66' };
+      const data: CmcdDataV1 = { nor: '../300kbps/segment35.m4v', sid: '6e2fb550-c457-11e9-bb97-0800200c9a66' };
       expect(cmcdDataToUrlParameter(data)).toEqual(
         'CMCD=nor%3D%22..%252F300kbps%252Fsegment35.m4v%22%2Csid%3D%226e2fb550-c457-11e9-bb97-0800200c9a66%22'
       );
@@ -454,7 +454,7 @@ describe('Cmcd', () => {
     });
 
     it('Section 6, Example #7:', () => {
-      const data: CmcdData = { nrr: '12323-48763', sid: '6e2fb550-c457-11e9-bb97-0800200c9a66' };
+      const data: CmcdDataV1 = { nrr: '12323-48763', sid: '6e2fb550-c457-11e9-bb97-0800200c9a66' };
       expect(cmcdDataToUrlParameter(data)).toEqual(
         'CMCD=nrr%3D%2212323-48763%22%2Csid%3D%226e2fb550-c457-11e9-bb97-0800200c9a66%22'
       );
@@ -465,7 +465,7 @@ describe('Cmcd', () => {
     });
 
     it('Section 6, Example #8:', () => {
-      const data: CmcdData = {
+      const data: CmcdDataV1 = {
         nor: '../300kbps/track.m4v',
         nrr: '12323-48763',
         sid: '6e2fb550-c457-11e9-bb97-0800200c9a66',
@@ -480,7 +480,7 @@ describe('Cmcd', () => {
     });
 
     it('Section 6, Example #9:', () => {
-      const data: CmcdData = {
+      const data: CmcdDataV1 = {
         bl: 21300,
         br: 3200,
         bs: true,
