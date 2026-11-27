@@ -12,6 +12,11 @@ and this project adheres to [Semantic Versioning](http://semver.org/).
 - `CmcdIntegration.sendCustomEvent(name, customKeys?)` to report a custom event (`e=ce`).
 - `CmcdIntegration.destroy()` to send pending Event Mode reports and remove all listeners and timers. With Event Mode, it is also called on the player `Destroy` event.
 
+### Fixed
+- `preprocessHttpRequest` threw if no player was set or a player API threw while collecting the data. The request is now sent without CMCD data and a console warning is logged once.
+- Calling `setPlayer` again registered all player event listeners a second time. The listeners of the previous player are now removed.
+
+## [0.6.2] - 2026-11-27
 ### Deprecated
 - `CustomKey.keyValuePairToString`. Encoding is done for all keys of a request at once.
 
@@ -22,8 +27,6 @@ and this project adheres to [Semantic Versioning](http://semver.org/).
 - `preprocessHttpResponse` threw if the player passed no response (e.g. after a network error), which could prevent the request from being retried. A missing response is now passed on unchanged.
 - `preprocessHttpRequest` could throw for values that cannot be encoded, e.g. a lone surrogate in a content id in query mode. The request is now sent without CMCD data and a console warning is logged.
 - In HTTP header mode, string values and custom key names that are not printable ASCII (e.g. line breaks or `é`) were sent in the CMCD headers. Such keys are now omitted with a console warning.
-- `preprocessHttpRequest` threw if no player was set or a player API threw while collecting the data. The request is now sent without CMCD data and a console warning is logged once.
-- Calling `setPlayer` again registered all player event listeners a second time. The listeners of the previous player are now removed.
 
 ## [0.6.1] - 2026-11-20
 ### Fixed
@@ -75,7 +78,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/).
 ### Added
 - Initial CMCD release (Beta)
 
-[Unreleased]: https://github.com/bitmovin/bitmovin-player-web-integration-cmcd/compare/v0.6.1...HEAD
+[Unreleased]: https://github.com/bitmovin/bitmovin-player-web-integration-cmcd/compare/v0.6.2...HEAD
+[0.6.2]: https://github.com/bitmovin/bitmovin-player-web-integration-cmcd/compare/v0.6.1...v0.6.2
 [0.6.1]: https://github.com/bitmovin/bitmovin-player-web-integration-cmcd/compare/v0.6.0...v0.6.1
 [0.6.0]: https://github.com/bitmovin/bitmovin-player-web-integration-cmcd/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/bitmovin/bitmovin-player-web-integration-cmcd/compare/v0.4.0...v0.5.0
