@@ -2,7 +2,7 @@
 
 This project adds support for Common Media Client Data (CMCD) to the Bitmovin Player.
 It implements CMCD v1 as defined in the Consumer Technology Association (CTA) specification CTA-5004, available from CTA at https://www.cta.tech/standards/wave-common-media-client-data/.
-Opt-in, it also implements CMCD v2 as defined in CTA-5004-B, published at https://cta-wave.github.io/Resources/common-media-client-data--cta-5004-b.html
+It also implements CMCD v2 (opt-in) as defined in CTA-5004-B, published at https://cta-wave.github.io/Resources/common-media-client-data--cta-5004-b.html
 
 ## Install
 Install with npm:
