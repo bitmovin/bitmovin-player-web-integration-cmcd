@@ -2,6 +2,16 @@ name: Release new version
 
 on:
   workflow_dispatch:
+    inputs:
+      bump:
+        description: 'Version increment. `auto` derives it from the Changelog entries.'
+        type: choice
+        options:
+          - auto
+          - major
+          - minor
+          - patch
+        default: auto
 
 permissions:
   contents: write # create GitHub release
@@ -45,10 +55,12 @@ jobs:
       - name: Define next release version based on Changelog entries
         uses: actions/github-script@v6
         id: define-release-version
+        env:
+          BUMP: ${{ inputs.bump }}
         with:
           script: |
             const { defineReleaseVersion } = require('./.github/scripts/defineVersion.js')
-            return defineReleaseVersion({core}, "${{ steps.read-latest-release-version.outputs.latestReleaseVersion }}", './CHANGELOG.md' )
+            return defineReleaseVersion({core}, "${{ steps.read-latest-release-version.outputs.latestReleaseVersion }}", './CHANGELOG.md', process.env.BUMP)
 
       - name: Bump package.json and Changelog version
         run: |
