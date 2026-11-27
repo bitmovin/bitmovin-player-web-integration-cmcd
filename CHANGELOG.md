@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](http://keepachangelog.com/)
 and this project adheres to [Semantic Versioning](http://semver.org/).
 
 ## [Unreleased]
+
+## [0.6.2] - 2026-11-27
 ### Deprecated
 - `CustomKey.keyValuePairToString`. Encoding is done for all keys of a request at once.
 
@@ -67,7 +69,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/).
 ### Added
 - Initial CMCD release (Beta)
 
-[Unreleased]: https://github.com/bitmovin/bitmovin-player-web-integration-cmcd/compare/v0.6.1...HEAD
+[Unreleased]: https://github.com/bitmovin/bitmovin-player-web-integration-cmcd/compare/v0.6.2...HEAD
+[0.6.2]: https://github.com/bitmovin/bitmovin-player-web-integration-cmcd/compare/v0.6.1...v0.6.2
 [0.6.1]: https://github.com/bitmovin/bitmovin-player-web-integration-cmcd/compare/v0.6.0...v0.6.1
 [0.6.0]: https://github.com/bitmovin/bitmovin-player-web-integration-cmcd/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/bitmovin/bitmovin-player-web-integration-cmcd/compare/v0.4.0...v0.5.0
