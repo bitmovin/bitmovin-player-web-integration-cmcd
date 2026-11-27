@@ -6,6 +6,14 @@ The format is based on [Keep a Changelog](http://keepachangelog.com/)
 and this project adheres to [Semantic Versioning](http://semver.org/).
 
 ## [Unreleased]
+### Added
+- Opt-in CMCD v2 (CTA-5004-B) Request Mode with `CmcdConfig.version: 2`. Sends `v=2`, inner lists with object type parameters, `pr` in `CMCD-Status`, `cid` of up to 128 characters, and the new keys `sta`, `sn`, `msd`, `pt`, `bg`, `bsa`, `bsd`, `bsda`, `ec`, `lb`, `tbl`, `pb`, `dfa` and `ltc`. Without `version`, or with `version: 1`, the output is unchanged.
+
+### Fixed
+- `preprocessHttpRequest` threw if no player was set or a player API threw while collecting the data. The request is now sent without CMCD data and a console warning is logged once.
+- Calling `setPlayer` again registered all player event listeners a second time. The listeners of the previous player are now removed.
+- Replacing the player with `setPlayer` kept the startup state of the previous player, so startup (`su`) was not sent during the startup of the new player. `setPlayer` while a source already plays no longer sends `su`.
+- The order of custom keys depended on the language of the browser. Keys are now sorted case-insensitively by code point.
 
 ## [0.6.2] - 2026-11-27
 ### Deprecated

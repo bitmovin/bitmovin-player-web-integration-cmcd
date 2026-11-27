@@ -1,7 +1,8 @@
 import { describe, beforeEach, afterEach, it, expect, jest } from '@jest/globals';
 import { HttpRequest, HttpRequestMethod, HttpRequestType, HttpResponseType, PlayerAPI } from 'bitmovin-player';
 import { CmcdIntegration, CmcdConfig } from '../../src/ts/CmcdIntegration';
-import { CmcdCustomKey, CmcdData, cmcdDataToHeader, cmcdDataToUrlParameter, CmcdHeaderType } from '../../src/ts/Cmcd';
+import { CmcdCustomKey, CmcdDataV1, cmcdDataToHeader, cmcdDataToUrlParameter, CmcdHeaderType } from '../../src/ts/Cmcd';
+import { playerExports } from './helpers/playerExports';
 
 // Jest Mocking for helper functions
 jest.mock('../../src/ts/Cmcd', () => {
@@ -16,7 +17,7 @@ jest.mock('../../src/ts/Cmcd', () => {
 const actualCmcd = jest.requireActual<typeof import('../../src/ts/Cmcd')>('../../src/ts/Cmcd');
 
 /** CMCD data passed to the encoder by the last request in query mode. */
-const lastCmcdData = () => (cmcdDataToUrlParameter as jest.Mock).mock.calls.at(-1)?.[0] as CmcdData;
+const lastCmcdData = () => (cmcdDataToUrlParameter as jest.Mock).mock.calls.at(-1)?.[0] as CmcdDataV1;
 
 describe('CmcdIntegration', () => {
   let cmcdIntegration: CmcdIntegration;
@@ -53,36 +54,7 @@ describe('CmcdIntegration', () => {
       getAvailableSegments: jest.fn(),
       isStalled: jest.fn().mockReturnValue(false),
       isPlaying: jest.fn().mockReturnValue(true),
-      exports: {
-        HttpRequestType: {
-          MEDIA_AUDIO: 'media/audio',
-          MEDIA_VIDEO: 'media/video',
-          MANIFEST_DASH: 'manifest/dash',
-          MANIFEST_HLS_MASTER: 'manifest/hls/master',
-          MANIFEST_HLS_VARIANT: 'manifest/hls/variant',
-          MANIFEST_SMOOTH: 'manifest/smooth',
-          MANIFEST_ADS: 'manifest/ads',
-          DRM_LICENSE_WIDEVINE: 'drm/license/widevine',
-        },
-        PlayerEvent: {
-          SourceUnloaded: 'sourceunloaded',
-          StallStarted: 'stallstarted',
-          StallEnded: 'stallended',
-          Seek: 'seek',
-          Seeked: 'seeked',
-          TimeShift: 'timeshift',
-          TimeShifted: 'timeshifted',
-          Playing: 'playing',
-        },
-        BufferType: {
-          ForwardDuration: 'forwardduration',
-          BackwardDuration: 'backwardduration',
-        },
-        MediaType: {
-          Video: 'video',
-          Audio: 'audio',
-        },
-      },
+      exports: playerExports,
       on: jest.fn((event: string, handler: () => void) => {
         playerEventHandlers[event] = handler;
       }),
@@ -342,7 +314,7 @@ describe('CmcdIntegration', () => {
       // Encoded key-value pair per key, e.g. `{ d: 'd=4000' }`
       const data = lastCmcdData();
       return Object.fromEntries(
-        (Object.keys(data) as (keyof CmcdData)[]).map((key) => [
+        (Object.keys(data) as (keyof CmcdDataV1)[]).map((key) => [
           key,
           Object.values(actualCmcd.cmcdDataToHeader({ [key]: data[key] })).join(),
         ])
@@ -534,7 +506,7 @@ describe('CmcdIntegration', () => {
         headers: {},
       });
       const data = lastCmcdData();
-      return (Object.keys(data) as (keyof CmcdData)[]).filter((key) => data[key] !== undefined);
+      return (Object.keys(data) as (keyof CmcdDataV1)[]).filter((key) => data[key] !== undefined);
     };
 
     beforeEach(() => {

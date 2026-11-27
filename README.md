@@ -2,6 +2,7 @@
 
 This project adds support for Common Media Client Data (CMCD) to the Bitmovin Player.
 It implements CMCD v1 as defined in the Consumer Technology Association (CTA) specification CTA-5004, available from CTA at https://www.cta.tech/standards/wave-common-media-client-data/.
+It also implements CMCD v2 (opt-in) as defined in CTA-5004-B, published at https://cta-wave.github.io/Resources/common-media-client-data--cta-5004-b.html
 
 ## Install
 Install with npm:
@@ -55,6 +56,60 @@ Load the source into the player after these steps:
 ```js
 player.load(source);
 ```
+
+## CMCD v2
+
+CMCD v1 is the default. To send CMCD v2 (CTA-5004-B) Request Mode data, set `version: 2`:
+
+```ts
+const cmcdConfig: CmcdConfig = {
+  version: 2,
+  useQueryArgs: true,
+  sessionId: '6e2fb550-c457-11e9-bb97-0800200c9a66',
+  contentId: '1111-111111-111111-11111',
+};
+```
+
+Differences to v1:
+- `v=2` is sent with each request.
+- Keys of type Inner List always use list syntax, e.g. `bl=(2000)`, `nor=("seg2.m4s")`. `br`, `lb`, `pb` and `tb` carry the object type of audio and video requests as parameter, e.g. `br=(3000;v)`. Audio requests carry `;a`, as video requests carry `;v` in spec example 8.1.1 (example 8.1.2 omits it for audio).
+- `pr` is sent in `CMCD-Status` as Decimal, e.g. `pr=2.0`.
+- `cid` can have up to 128 characters (`sid` up to 64).
+- `nor` is sent as plain relative path. It is URL encoded only with the whole payload in query mode.
+- `nrr` is not sent.
+- All values follow RFC 8941 (Structured Field Values). Values that do not comply, e.g. strings with characters outside printable ASCII, are omitted with a console warning, also in query mode.
+- Custom key names must be valid RFC 8941 keys (lowercase). Custom values are sent as String (numbers are converted) of up to 64 characters; longer values are omitted with a console warning.
+
+Additional keys in v2:
+
+| Key | Description | Source |
+| --- | --- | --- |
+| `sta` | Play state: `d` before play, `s` starting, `p` playing, `k` seeking, `r` rebuffering, `a` paused (also if the browser blocked autoplay), `e` ended, `f` fatal error | Player events and state at request time |
+| `sn` | Sequence number per origin (report destination), starting at 0 | Counted per request |
+| `msd` | Startup delay from the first `Play` to `Playing`, sent once per session id with the next media object request (audio, video or init segment) | Player events |
+| `pt` | Playhead time in ms. VOD: offset from the start. Live: epoch ms if the player knows the wallclock time, else the player's current time | `getCurrentTime()` |
+| `bsa`, `bsda` | Rebuffering count and duration since session start, also when 0 | `StallStarted`/`StallEnded` |
+| `bsd` | Durations of the completed rebufferings, reported once to each origin (the last 32 per origin). The first request of the session to an origin carries the durations of the session. | `StallStarted`/`StallEnded` |
+| `ec` | Player error codes, reported once to each origin, also errors before the first request to the origin. Warnings are not reported, as their codes overlap with error codes | `Error` events |
+| `lb` | Lowest bitrate of the requested media type | `getAvailableVideoQualities()`/`getAvailableAudioQualities()` |
+| `tbl` | Target buffer length of the requested media type | `buffer.getLevel()` |
+| `pb` | Bitrate being played of the requested media type | `getPlaybackVideoData()`/`getPlaybackAudioData()` |
+| `bg` | Backgrounded: sent while the page is hidden, e.g. after switching the tab or minimizing the window. Not sent while the page is visible | Page Visibility API (`document.visibilityState`) |
+| `dfa` | Dropped frames since session start, video requests only, also when 0 | `getDroppedVideoFrames()` |
+| `ltc` | Live latency | `lowlatency.getLatency()` |
+
+Rebuffering excludes stalls during startup and seeking; a seek ends an ongoing rebuffering. In v2, `bs` is reported once to each origin after a stall. With `PlaybackConfig.autoplay`, `msd` is measured from the `Play` event of the autoplay.
+
+`sn`, `bsa`, `bsda`, `dfa` and `msd` continue across sources until the application sets a new session id with `setSessionId`. A new session id resets them. `bs`, `bsd` and `ec` are buffered per origin for up to 16 origins; the least recently used origin is dropped. `sn` keeps increasing for a dropped origin.
+
+Not implemented:
+- Event Mode and all Event-only keys
+- `nr`, `cs`: no reliable source
+- `tpb`: increases the fingerprinting surface and SHOULD NOT be sent by default
+- `ab`, `lab`, `tab`: only for unknown individual bitrates, which the player always knows
+- `st=ll`: the player does not expose whether a stream is low latency
+- `sta=q` (quit) and `sta=w`
+- Multiple values per key, e.g. `nor` with more than one object or `bl` for audio and video in one request
 
 ## Setup for Development
 1. Run `npm install` to install dependencies
