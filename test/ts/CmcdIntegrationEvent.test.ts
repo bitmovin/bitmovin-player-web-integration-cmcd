@@ -267,6 +267,33 @@ describe('CmcdIntegration Event Mode', () => {
   });
 
   describe('events', () => {
+    it('b: reports entering (with bg) and leaving (without bg) the backgrounded mode', async () => {
+      integration = create([{ url: COLLECTOR, events: ['b'], keys: ['bg'] }]);
+      const setVisibility = (value: string) => {
+        Object.defineProperty(document, 'visibilityState', { value, configurable: true });
+        document.dispatchEvent(new Event('visibilitychange'));
+      };
+      setVisibility('hidden');
+      setVisibility('visible');
+
+      expect((await parsedTo()).map((record) => [record.e, record.bg])).toEqual([
+        // Bare key `bg`, as parsed by `parsedTo`
+        ['b', '?1'],
+        ['b', undefined],
+      ]);
+    });
+
+    it('ps: reports paused if autoplay was blocked', async () => {
+      integration = create([{ url: COLLECTOR, events: ['ps'], keys: [] }]);
+      emit('sourceloaded');
+      // The player pauses after warning 1303 without a play event.
+      state.paused = true;
+      emit('warning', { code: 1303 });
+      emit('paused');
+
+      expect((await parsedTo()).map((record) => record.sta)).toEqual(['d', 'a']);
+    });
+
     it('ps: reports each play state change once', async () => {
       integration = create([{ url: COLLECTOR, events: ['ps'], keys: [] }]);
       emit('sourceloaded');

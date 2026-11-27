@@ -115,6 +115,12 @@ const RTP_ENCODED_BITRATE_FACTOR = 5;
 /** Maximum number of origins with own `sn`, `bsd` and `ec` state. The least recently used one is dropped. */
 const MAX_TARGETS = 16;
 
+/**
+ * Backgrounded (`bg`): a hidden page means that all its players are hidden, e.g. after switching the tab or
+ * minimizing the window. Unknown without the Page Visibility API.
+ */
+const isPageHidden = () => typeof document !== 'undefined' && document.visibilityState === 'hidden';
+
 /** Timestamp of an event, or now if the event has none. */
 const eventTime = (event?: PlayerEventBase) => (event && event.timestamp) || Date.now();
 
@@ -439,6 +445,9 @@ export class CmcdIntegration {
   /** Event Mode: the keys of the state that this class tracks */
   private getEventStateData(): CmcdData {
     const data: CmcdData = { bsa: this.rebufferingCount, bsda: this.rebufferingDuration };
+    if (isPageHidden()) {
+      data.bg = true;
+    }
     if (this.isValidId('cid', this.contentId, CMCD_V2_EVENT_KEYS)) {
       data.cid = this.contentId;
     }
@@ -551,8 +560,7 @@ export class CmcdIntegration {
         data.msd = startupDelay;
       }
     }
-    // A hidden page means that all its players are hidden, e.g. after switching the tab or minimizing the window.
-    if (this.keys.bg && typeof document !== 'undefined' && document.visibilityState === 'hidden') {
+    if (this.keys.bg && isPageHidden()) {
       data.bg = true;
     }
     if (this.keys.bsa) {

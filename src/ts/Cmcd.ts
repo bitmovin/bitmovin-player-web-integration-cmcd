@@ -67,6 +67,7 @@ export type CmcdEventType =
   | 'abs'
   | 'ae'
   | 'as'
+  | 'b'
   | 'bc'
   | 'c'
   | 'ce'

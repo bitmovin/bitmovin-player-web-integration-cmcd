@@ -111,6 +111,8 @@ export class CmcdEventMode {
       const flushNow = () => this.flush(true);
       this.addPageListener(window, 'pagehide', flushNow);
       this.addPageListener(document, 'visibilitychange', () => {
+        // Entered (with `bg`) or left (without `bg`) the backgrounded mode
+        this.report('b', Date.now());
         if (document.visibilityState === 'hidden') {
           flushNow();
         }

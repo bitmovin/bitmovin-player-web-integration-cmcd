@@ -152,6 +152,7 @@ Events:
 | `e` | `Error`, with the error code in `ec` |
 | `t` | Interval while a source is loaded |
 | `rr` | Each response (`preprocessHttpResponse`), with `url` (before redirects and without CMCD), `rc`, `ttlb`, `ttfb` (if the player measures it), `ot`, and `cmsdd`/`cmsds` (Base64 of the `CMSD-Dynamic`/`CMSD-Static` response headers, if readable). `ts` is the request start. |
+| `b` | Page visibility changed (`visibilitychange`): with `bg` when the page became hidden, without `bg` when it became visible again |
 | `c` | `setContentId` with a different id |
 | `h` | Hostname of manifest or media requests changed (not for the first one) |
 | `m`, `um` | `Muted`, `Unmuted`. Also sent when the player or the application mutes, not only for user actions. |
@@ -179,7 +180,7 @@ Notes:
 - `cmsdd`/`cmsds` need `Access-Control-Expose-Headers` for the CMSD headers on cross-origin media responses, and `Retry-After` needs it on cross-origin endpoint responses.
 
 Not implemented in Event Mode:
-- `b` (backgrounded), `pc`/`pe` (player collapse/expand): no reliable source for a user action
+- `pc`/`pe` (player collapse/expand): no reliable source for a user action
 - `pr` as event (playback rate change)
 - `ttfbb` (the player does not measure the first body byte), `smrt`, `nor`, `su`, `nr`, `tpb`
 
