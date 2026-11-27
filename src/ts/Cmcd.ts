@@ -124,6 +124,8 @@ export interface CmcdData {
   v?: CmcdVersionNumbers;
 
   // v2 only
+  /** Backgrounded: the page is hidden */
+  bg?: boolean;
   /** Buffer starvation count since session start */
   bsa?: number;
   /** Durations of the buffer starvations completed since the prior request, in ms */
@@ -215,6 +217,7 @@ export const CMCD_V1_KEYS: CmcdKeyTable = {
 export const CMCD_V2_KEYS: CmcdKeyTable = {
   bl: { header: CmcdHeaderType.Request, type: 'integer', round: 100, list: 'plain' },
   br: { header: CmcdHeaderType.Object, type: 'integer', round: 1, list: 'typed' },
+  bg: { header: CmcdHeaderType.Status, type: 'boolean', omit: false },
   bs: { header: CmcdHeaderType.Status, type: 'boolean', omit: false },
   bsa: { header: CmcdHeaderType.Status, type: 'integer', list: 'plain' },
   bsd: { header: CmcdHeaderType.Status, type: 'integer', round: 1, list: 'plain' },

@@ -243,11 +243,11 @@ describe('CMCD v2 encoding', () => {
       for (const key of Object.keys(CMCD_V2_KEYS) as (keyof CmcdData)[]) {
         (shards[CMCD_V2_KEYS[key]!.header] ||= []).push(key);
       }
-      // 8.1.8 without the keys that are not implemented (bg, cs, nr, tpb)
+      // 8.1.8 without the keys that are not implemented (cs, nr, tpb)
       expect(shards).toEqual({
         [CmcdHeaderType.Request]: ['bl', 'dfa', 'dl', 'ltc', 'mtp', 'nor', 'pb', 'sn', 'sta', 'su', 'tbl'],
         [CmcdHeaderType.Object]: ['br', 'd', 'lb', 'ot', 'tb'],
-        [CmcdHeaderType.Status]: ['bs', 'bsa', 'bsd', 'bsda', 'ec', 'pr', 'pt', 'rtp'],
+        [CmcdHeaderType.Status]: ['bg', 'bs', 'bsa', 'bsd', 'bsda', 'ec', 'pr', 'pt', 'rtp'],
         [CmcdHeaderType.Session]: ['cid', 'msd', 'sf', 'sid', 'st', 'v'],
       });
     });
