@@ -12,10 +12,6 @@ and this project adheres to [Semantic Versioning](http://semver.org/).
 - `CmcdIntegration.sendCustomEvent(name, customKeys?)` to report a custom event (`e=ce`).
 - `CmcdIntegration.destroy()` to send pending Event Mode reports and remove all listeners and timers. With Event Mode, it is also called on the player `Destroy` event.
 
-### Changed
-- Internal refactoring of CMCD encoding in preparation for CMCD v2; no change in output for valid values.
-- Type declarations in `Cmcd.d.ts`: `CmcdBase`, `CmcdKeysToken`, the per-key classes (e.g. `CmcdEncodedBitrate`, `CmcdSessionId`) and `cmcdDataToJson` are removed. `cmcdDataToHeader` and `cmcdDataToUrlParameter` now take a `CmcdData` object and the custom keys instead of a list of key objects. None of these were part of the bundle's exports.
-
 ### Deprecated
 - `CustomKey.keyValuePairToString`. Encoding is done for all keys of a request at once.
 
